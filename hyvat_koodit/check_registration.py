@@ -1,6 +1,7 @@
 import os
 import json
 import requests
+import re
 from bs4 import BeautifulSoup as BS
 from datetime import datetime, timedelta
 
@@ -64,7 +65,7 @@ def check_competition(comp: dict) -> dict:
         r.encoding = r.apparent_encoding
         soup = BS(r.text, 'html.parser')
         # Check visible page text first
-        page_text = soup.get_text(separator=' ', strip=True)
+        page_text = str(soup.get_text(separator=' ', strip=True))
         # direct open
         if text_contains_open(page_text):
             result['registration_open'] = True
@@ -124,21 +125,21 @@ def check_competition(comp: dict) -> dict:
                         return result
         # Look for register links/buttons
         for a in soup.select('a'):
-            href = (a.get('href') or '').lower()
-            txt = (a.get_text() or '').lower()
+            href = str(a.get('href') or '').lower()
+            txt = str(a.get_text() or '').lower()
             if 'register' in href or 'register' in txt or 'ilmoittaudu' in href or 'ilmoittaudu' in txt:
                 result['registration_open'] = True
                 result['note'] = 'register link/button'
                 return result
         # look for input/button elements that imply registration
         for btn in soup.select('button'):
-            txt = (btn.get_text() or '').lower()
+            txt = str(btn.get_text() or '').lower()
             if 'register' in txt or 'ilmoittaudu' in txt or 'ilmoittautu' in txt:
                 result['registration_open'] = True
                 result['note'] = 'register button'
                 return result
         # fallback: check meta tags
-        meta = ' '.join([m.get('content','') for m in soup.select('meta') if m.get('content')])
+        meta = ' '.join(str(m.get('content','')) for m in soup.select('meta') if m.get('content'))
         if text_contains_open(meta):
             result['registration_open'] = True
             result['note'] = 'keyword in meta'

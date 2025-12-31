@@ -90,7 +90,24 @@ def load_known(path):
     try:
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            return set([str(x) for x in data])
+            keys = set()
+            for x in data:
+                try:
+                    if isinstance(x, dict):
+                        k = x.get('id') or x.get('url') or x.get('name') or x.get('title')
+                        if k is None:
+                            # fallback to full dict string
+                            keys.add(str(x))
+                        else:
+                            keys.add(str(k))
+                    else:
+                        keys.add(str(x))
+                except Exception:
+                    try:
+                        keys.add(str(x))
+                    except Exception:
+                        continue
+            return keys
     except Exception:
         return set()
 

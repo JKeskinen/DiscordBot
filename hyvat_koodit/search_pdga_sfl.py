@@ -36,18 +36,20 @@ def fetch_competitions(url: str):
     results = []
     # gridlist
     for a in container.select("a.gridlist"):
-        href = a.get("href", "")
+        href = a.get("href", "") or ''
+        href_str = str(href)
         comp_id = None
-        m = re.search(r"/(\d+)", href)
+        m = re.search(r"/(\d+)", href_str)
         if m:
             comp_id = m.group(1)
-        title = a.find("h2").get_text(strip=True) if a.find("h2") else a.get_text(strip=True)
+        h2 = a.find("h2")
+        title = h2.get_text(strip=True) if h2 is not None and getattr(h2, 'get_text', None) else (a.get_text(strip=True) or '')
         tspan = a.select_one(".competition-type")
-        tier = tspan.get_text(strip=True) if tspan else ""
-        meta = a.select(".metadata-list li")
-        date = meta[0].get_text(strip=True) if len(meta) > 0 else ""
-        location = meta[1].get_text(strip=True) if len(meta) > 1 else ""
-        results.append({"id": comp_id, "name": title, "tier": tier, "date": date, "location": location, "url": _abs(href)})
+        tier = tspan.get_text(strip=True) if tspan is not None else ""
+        meta = a.select(".metadata-list li") or []
+        date = meta[0].get_text(strip=True) if len(meta) > 0 and getattr(meta[0], 'get_text', None) else ""
+        location = meta[1].get_text(strip=True) if len(meta) > 1 and getattr(meta[1], 'get_text', None) else ""
+        results.append({"id": comp_id, "name": title, "tier": tier, "date": date, "location": location, "url": _abs(href_str)})
 
     # table rows
     for tr in container.select("table.table-list tbody tr"):
@@ -55,16 +57,17 @@ def fetch_competitions(url: str):
         if not cols:
             continue
         link = cols[0].find("a")
-        href = link["href"] if link else ""
+        href = link.get('href', '') if link is not None else ''
+        href_str = str(href)
         comp_id = None
-        m = re.search(r"/(\d+)", href)
+        m = re.search(r"/(\d+)", href_str)
         if m:
             comp_id = m.group(1)
-        name = link.get_text(strip=True) if link else cols[0].get_text(strip=True)
-        date = cols[1].get_text(strip=True) if len(cols) > 1 else ""
-        tier = cols[2].get_text(strip=True) if len(cols) > 2 else ""
-        location = cols[3].get_text(strip=True) if len(cols) > 3 else ""
-        results.append({"id": comp_id, "name": name, "tier": tier, "date": date, "location": location, "url": _abs(href)})
+        name = link.get_text(strip=True) if link is not None and getattr(link, 'get_text', None) else (cols[0].get_text(strip=True) or '')
+        date = cols[1].get_text(strip=True) if len(cols) > 1 and getattr(cols[1], 'get_text', None) else ""
+        tier = cols[2].get_text(strip=True) if len(cols) > 2 and getattr(cols[2], 'get_text', None) else ""
+        location = cols[3].get_text(strip=True) if len(cols) > 3 and getattr(cols[3], 'get_text', None) else ""
+        results.append({"id": comp_id, "name": name, "tier": tier, "date": date, "location": location, "url": _abs(href_str)})
 
     # dedupe by id/title
     seen = set()
@@ -101,29 +104,32 @@ def fetch_competitions(url: str):
             cont2 = soup2.find(id='competition_list2') or soup2
             results2 = []
             for a in cont2.select('a.gridlist'):
-                href = a.get('href','')
-                m = re.search(r"/(\d+)", href)
+                href = a.get('href','') or ''
+                href_str = str(href)
+                m = re.search(r"/(\d+)", href_str)
                 cid = m.group(1) if m else None
-                title = a.find('h2').get_text(strip=True) if a.find('h2') else a.get_text(strip=True)
+                h2 = a.find('h2')
+                title = h2.get_text(strip=True) if h2 is not None and getattr(h2, 'get_text', None) else (a.get_text(strip=True) or '')
                 tspan = a.select_one('.competition-type')
-                tier = tspan.get_text(strip=True) if tspan else ''
-                meta = a.select('.metadata-list li')
-                date = meta[0].get_text(strip=True) if len(meta) > 0 else ''
-                location = meta[1].get_text(strip=True) if len(meta) > 1 else ''
-                results2.append({"id": cid, "name": title, "tier": tier, "date": date, "location": location, "url": _abs(href)})
+                tier = tspan.get_text(strip=True) if tspan is not None else ''
+                meta = a.select('.metadata-list li') or []
+                date = meta[0].get_text(strip=True) if len(meta) > 0 and getattr(meta[0], 'get_text', None) else ''
+                location = meta[1].get_text(strip=True) if len(meta) > 1 and getattr(meta[1], 'get_text', None) else ''
+                results2.append({"id": cid, "name": title, "tier": tier, "date": date, "location": location, "url": _abs(href_str)})
             for tr in cont2.select('table.table-list tbody tr'):
                 cols = tr.find_all('td')
                 if not cols:
                     continue
                 link = cols[0].find('a')
-                href = link['href'] if link else ''
-                m = re.search(r"/(\d+)", href)
+                href = link.get('href','') if link is not None else ''
+                href_str = str(href)
+                m = re.search(r"/(\d+)", href_str)
                 cid = m.group(1) if m else None
-                name = link.get_text(strip=True) if link else cols[0].get_text(strip=True)
-                date = cols[1].get_text(strip=True) if len(cols) > 1 else ''
-                tier = cols[2].get_text(strip=True) if len(cols) > 2 else ''
-                location = cols[3].get_text(strip=True) if len(cols) > 3 else ''
-                results2.append({"id": cid, "name": name, "tier": tier, "date": date, "location": location, "url": _abs(href)})
+                name = link.get_text(strip=True) if link is not None and getattr(link, 'get_text', None) else cols[0].get_text(strip=True)
+                date = cols[1].get_text(strip=True) if len(cols) > 1 and getattr(cols[1], 'get_text', None) else ''
+                tier = cols[2].get_text(strip=True) if len(cols) > 2 and getattr(cols[2], 'get_text', None) else ''
+                location = cols[3].get_text(strip=True) if len(cols) > 3 and getattr(cols[3], 'get_text', None) else ''
+                results2.append({"id": cid, "name": name, "tier": tier, "date": date, "location": location, "url": _abs(href_str)})
             # dedupe
             seen2 = set()
             unique2 = []

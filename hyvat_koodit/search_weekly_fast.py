@@ -36,17 +36,22 @@ pair_re = re.compile(r"\b(pari|parikisa|parikilpailu|parigolf|pariviikko|parivii
 if container:
     # gridlist entries
     for a in container.select('a.gridlist'):
-        href = a.get('href','')
+        href = a.get('href', '') or ''
+        href_str = str(href)
         comp_id = None
-        m = re.search(r"/(\d+)", href)
+        m = re.search(r"/(\d+)", href_str)
         if m:
             comp_id = m.group(1)
-        title = a.find('h2').get_text(strip=True) if a.find('h2') else a.get_text(strip=True)
+        h2 = a.find('h2')
+        if h2 is not None:
+            title = h2.get_text(strip=True)
+        else:
+            title = a.get_text(strip=True) or ''
         tspan = a.select_one('.competition-type')
-        tier = tspan.get_text(strip=True) if tspan else ''
-        meta = a.select('.metadata-list li')
-        date = meta[0].get_text(strip=True) if len(meta) > 0 else ''
-        location = meta[1].get_text(strip=True) if len(meta) > 1 else ''
+        tier = tspan.get_text(strip=True) if tspan is not None else ''
+        meta = a.select('.metadata-list li') or []
+        date = meta[0].get_text(strip=True) if len(meta) > 0 and getattr(meta[0], 'get_text', None) else ''
+        location = meta[1].get_text(strip=True) if len(meta) > 1 and getattr(meta[1], 'get_text', None) else ''
         kind = None
         title_l = (title or '').lower()
         loc_l = (location or '').lower()
@@ -64,11 +69,11 @@ if container:
             kind = 'VIIKKOKISA'
         # build absolute URL when href is present
         url = ''
-        if href:
+        if href_str:
             try:
-                url = urllib.parse.urljoin('https://discgolfmetrix.com', href)
+                url = urllib.parse.urljoin('https://discgolfmetrix.com', href_str)
             except Exception:
-                url = href
+                url = href_str
         results.append({'id': comp_id, 'title': title, 'tier': tier, 'date': date, 'location': location, 'kind': kind, 'url': url})
     # table rows fallback
     for tr in container.select('table.table-list tbody tr'):
@@ -76,15 +81,16 @@ if container:
         if not cols:
             continue
         link = cols[0].find('a')
-        href = link['href'] if link else ''
+        href = link.get('href', '') if link else ''
+        href_str = str(href)
         comp_id = None
-        m = re.search(r"/(\d+)", href)
+        m = re.search(r"/(\d+)", href_str)
         if m:
             comp_id = m.group(1)
-        name = link.get_text(strip=True) if link else cols[0].get_text(strip=True)
-        date = cols[1].get_text(strip=True) if len(cols) > 1 else ''
-        tier = cols[2].get_text(strip=True) if len(cols) > 2 else ''
-        location = cols[3].get_text(strip=True) if len(cols) > 3 else ''
+        name = link.get_text(strip=True) if link is not None else cols[0].get_text(strip=True) or ''
+        date = cols[1].get_text(strip=True) if len(cols) > 1 and getattr(cols[1], 'get_text', None) else ''
+        tier = cols[2].get_text(strip=True) if len(cols) > 2 and getattr(cols[2], 'get_text', None) else ''
+        location = cols[3].get_text(strip=True) if len(cols) > 3 and getattr(cols[3], 'get_text', None) else ''
         kind = None
         if pair_re.search(name) or pair_re.search(location) or pair_re.search(tier):
             kind = 'PARIKISA'
@@ -92,11 +98,11 @@ if container:
             kind = 'VIIKKOKISA'
         # build absolute URL when href is present
         url = ''
-        if href:
+        if href_str:
             try:
-                url = urllib.parse.urljoin('https://discgolfmetrix.com', href)
+                url = urllib.parse.urljoin('https://discgolfmetrix.com', href_str)
             except Exception:
-                url = href
+                url = href_str
         results.append({'id': comp_id, 'title': name, 'tier': tier, 'date': date, 'location': location, 'kind': kind, 'url': url})
 
 # dedupe
@@ -131,7 +137,9 @@ try:
 except Exception as e:
     print(f"Failed to save VIIKKOKISA.json: {e}")
 
-for r in unique:
-    print(f"- {r.get('id')} | {r.get('title')} | {r.get('kind')} | {r.get('location')} | {r.get('date')}")
+WEEKLY_VERBOSE = os.environ.get('WEEKLY_VERBOSE', '0') == '1'
+if WEEKLY_VERBOSE:
+    for r in unique:
+        print(f"- {r.get('id')} | {r.get('title')} | {r.get('kind')} | {r.get('location')} | {r.get('date')}")
 
 print('\nDone.')

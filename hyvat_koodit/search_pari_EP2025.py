@@ -22,32 +22,38 @@ def find_doubles(area_name=None, date1='2026-01-01', date2='2027-01-01'):
     container = soup
     # gridlist items
     for a in container.select('a.gridlist'):
-        href = a.get('href','')
-        m = re.search(r"/(\d+)", href)
+        href = a.get('href', '') or ''
+        href_str = str(href)
+        m = re.search(r"/(\d+)", href_str)
         comp_id = m.group(1) if m else None
-        title = a.find('h2').get_text(strip=True) if a.find('h2') else a.get_text(strip=True)
+        h2 = a.find('h2')
+        if h2 is not None:
+            title = h2.get_text(strip=True)
+        else:
+            title = a.get_text(strip=True) or ''
         kind = None
         tspan = a.select_one('.competition-type')
-        if tspan:
+        if tspan is not None:
             kind = tspan.get_text(strip=True)
         meta = a.select_one('.metadata-list')
         date = None
         location = None
-        if meta:
-            lis = meta.find_all('li')
+        if meta is not None:
+            lis = meta.find_all('li') or []
             if lis:
-                date = lis[0].get_text(strip=True)
+                date = lis[0].get_text(strip=True) if getattr(lis[0], 'get_text', None) else None
             if len(lis) > 1:
-                location = lis[1].get_text(strip=True)
+                location = lis[1].get_text(strip=True) if getattr(lis[1], 'get_text', None) else None
         results.append({'id':comp_id,'title':title,'kind':kind,'date':date,'location':location})
 
     # table rows
     for tr in container.select('table.table-list tbody tr'):
         a = tr.select_one('a')
         href = a.get('href','') if a else ''
-        m = re.search(r"/(\d+)", href)
+        href_str = str(href)
+        m = re.search(r"/(\d+)", href_str)
         comp_id = m.group(1) if m else None
-        name = a.get_text(strip=True) if a else tr.get_text(strip=True)
+        name = a.get_text(strip=True) if a is not None else tr.get_text(strip=True)
         cols = [td.get_text(strip=True) for td in tr.find_all('td')]
         date = cols[1] if len(cols) > 1 else None
         kind = cols[2] if len(cols) > 2 else None

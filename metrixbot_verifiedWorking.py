@@ -1,9 +1,13 @@
 import os
 import json
 import time
+import threading
 import requests
 import logging
 import re
+
+# Module base dir
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 
 # Configure structured logging similar to discord.py examples
 LOG_FMT = "%(asctime)s %(levelname)-8s %(name)s %(message)s"
@@ -500,6 +504,133 @@ def run_once():
         post_to_discord(weekly_thread, token, wd_msg)
 
 
+def _run_registration_check_once(base_dir, out_path=None):
+    """Run the registration checker once: inspect PDGA + weekly lists, write pending file,
+    and call posting helpers to post new/open registrations.
+    This mirrors hyvat_koodit.check_registration + post_pending_registration logic but
+    keeps it inside this process to avoid subprocesses.
+    """
+    try:
+        import hyvat_koodit.check_registration as reg_mod
+        import hyvat_koodit.post_pending_registration as post_mod
+    except Exception as e:
+        print('Failed to import registration modules:', e)
+        return
+
+    pdga_path = os.path.join(base_dir, 'PDGA.json')
+    weekly_path = os.path.join(base_dir, 'VIIKKOKISA.json')
+    out_path = out_path or os.path.join(base_dir, REG_CHECK_FILE)
+
+    comps = []
+    for path, label in ((pdga_path, 'PDGA'), (weekly_path, 'VIIKKOKISA')):
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                lst = json.load(f)
+                for c in lst:
+                    if label == 'VIIKKOKISA':
+                        c.setdefault('kind', 'VIIKKOKISA')
+                    comps.append(c)
+        except FileNotFoundError:
+            # not fatal; continue
+            continue
+        except Exception as e:
+            print('Failed to read competition list for registration check:', e)
+
+    results = []
+    for c in comps:
+        try:
+            r = reg_mod.check_competition(c)
+            results.append(r)
+        except Exception as e:
+            print('check_competition error for', c.get('id') or c.get('name'), e)
+
+    # Save pending registration file (only open or opening_soon entries)
+    pending = [r for r in results if r.get('registration_open') or r.get('opening_soon')]
+    try:
+        with open(out_path, 'w', encoding='utf-8') as f:
+            json.dump(pending, f, ensure_ascii=False, indent=2)
+        print(f'Saved {len(pending)} pending registrations to', out_path)
+    except Exception as e:
+        print('Failed to save pending registrations:', e)
+        return
+
+    # Now reuse post_pending_registration helpers to post new items
+    try:
+        # load pending through helper for consistency
+        pending_loaded = post_mod.load_pending()
+        if not pending_loaded:
+            print('No open registrations to post')
+            return
+
+        # Partition pending items
+        pdga = []
+        weekly = []
+        for it in pending_loaded:
+            kind = (it.get('kind') or it.get('tier') or '').upper()
+            if 'PDGA' in kind:
+                pdga.append(it)
+            else:
+                weekly.append(it)
+
+        # Use post_mod's functions to determine new items and post
+        known_pdga = post_mod.load_known(post_mod.KNOWN_PDGA)
+        known_weekly = post_mod.load_known(post_mod.KNOWN_WEEKLY)
+
+        pdga_ids = [str(it.get('id') or it.get('url') or it.get('name')) for it in pdga]
+        weekly_ids = [str(it.get('id') or it.get('url') or it.get('name')) for it in weekly]
+
+        new_pdga = [it for it in pdga if str(it.get('id') or it.get('url') or it.get('name')) not in known_pdga]
+        new_weekly = [it for it in weekly if str(it.get('id') or it.get('url') or it.get('name')) not in known_weekly]
+
+        # PDGA posting
+        to_post_pdga = pdga if not known_pdga else new_pdga
+        if to_post_pdga:
+            pdga_open = [it for it in to_post_pdga if it.get('registration_open')]
+            pdga_soon = [it for it in to_post_pdga if (not it.get('registration_open')) and it.get('opening_soon')]
+
+            if pdga_open:
+                embeds = post_mod.build_embeds_with_title(pdga_open, f"REKISTERÖINTI AVOINNA ({len(pdga_open)})", 5763714)
+                post_mod.post_embeds(post_mod.PDGA_THREAD, embeds)
+            if pdga_soon:
+                embeds = post_mod.build_embeds_with_title(pdga_soon, f"REKISTERÖINTI AVAUTUU PIAN ({len(pdga_soon)})", 16750848)
+                post_mod.post_embeds(post_mod.PDGA_THREAD, embeds)
+
+            known_pdga.update(pdga_ids)
+            post_mod.save_known(post_mod.KNOWN_PDGA, known_pdga)
+
+        # Weekly posting
+        to_post_weekly = weekly if not known_weekly else new_weekly
+        if to_post_weekly:
+            weekly_open = [it for it in to_post_weekly if it.get('registration_open')]
+            weekly_soon = [it for it in to_post_weekly if (not it.get('registration_open')) and it.get('opening_soon')]
+
+            if weekly_open:
+                embeds = post_mod.build_embeds_with_title(weekly_open, f"REKISTERÖINTI AVOINNA ({len(weekly_open)})", 5763714)
+                post_mod.post_embeds(post_mod.WEEKLY_THREAD, embeds)
+            if weekly_soon:
+                embeds = post_mod.build_embeds_with_title(weekly_soon, f"REKISTERÖINTI AVAUTUU PIAN ({len(weekly_soon)})", 16750848)
+                post_mod.post_embeds(post_mod.WEEKLY_THREAD, embeds)
+
+            known_weekly.update(weekly_ids)
+            post_mod.save_known(post_mod.KNOWN_WEEKLY, known_weekly)
+
+    except Exception as e:
+        print('Failed to post pending registrations via post_mod:', e)
+
+
+def start_registration_worker(base_dir, interval_seconds: int):
+    def worker():
+        while True:
+            try:
+                _run_registration_check_once(base_dir)
+            except Exception as e:
+                print('Registration worker error:', e)
+            time.sleep(max(10, int(interval_seconds)))
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+    return t
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='metrixDiscordBot orchestrator')
@@ -535,6 +666,9 @@ def main():
         for i in range(times):
             print(f'Run {i+1}/{times}')
             run_once()
+            # run registration check once after each run_once when requested
+            if args.check_registrations:
+                _run_registration_check_once(BASE_DIR)
             if i < times - 1:
                 # small delay between runs to avoid hammering upstream
                 time.sleep(1)
@@ -542,9 +676,20 @@ def main():
 
     if args.daemon:
         print('Starting metrixbot daemon; first run now')
+        # start registration worker thread
+        try:
+            start_registration_worker(BASE_DIR, CHECK_REGISTRATION_INTERVAL)
+            print('Registration worker started (interval', CHECK_REGISTRATION_INTERVAL, 's)')
+        except Exception as e:
+            print('Failed to start registration worker:', e)
         while True:
             try:
                 run_once()
+                # After updating competition files and known caches, run registration check
+                try:
+                    _run_registration_check_once(BASE_DIR)
+                except Exception as e:
+                    print('Registration check failed after run_once:', e)
             except Exception as e:
                 print('Run failed in daemon loop:', e)
             # sleep interval
