@@ -44,6 +44,10 @@ class CommandListenerThread(threading.Thread):
                 if not content.lower().startswith(self.prefix + 'rek'):
                     return
 
+                # parse command args (allow: !rek, !rek pdga, !rek week)
+                parts = content.split()
+                arg = parts[1].lower() if len(parts) > 1 else None
+
                 # Load pending registrations
                 base_dir = os.path.abspath(os.path.dirname(__file__))
                 # project root
@@ -65,10 +69,43 @@ class CommandListenerThread(threading.Thread):
                     channel_id = str(message.channel.id)
                     pdga_thread = os.environ.get('DISCORD_PDGA_THREAD')
                     weekly_thread = os.environ.get('DISCORD_WEEKLY_THREAD')
-                    if pdga_thread and channel_id == str(pdga_thread):
-                        entries = [e for e in entries if (e.get('kind') or '').upper() == 'PDGA']
-                    elif weekly_thread and channel_id == str(weekly_thread):
-                        entries = [e for e in entries if (e.get('kind') or '').upper() != 'PDGA']
+
+                    def is_pdga(e):
+                        return 'PDGA' in (e.get('kind') or '').upper()
+
+                    target = None
+                    # explicit arg overrides (e.g. '!rek pdga' or '!rek week')
+                    if arg in ('pdga', 'p'):
+                        target = 'pdga'
+                    elif arg in ('week', 'weekly', 'viikko', 'viikkokisa', 'v'):
+                        target = 'weekly'
+
+                    # env var mapping
+                    if target is None:
+                        if pdga_thread and channel_id == str(pdga_thread):
+                            target = 'pdga'
+                        elif weekly_thread and channel_id == str(weekly_thread):
+                            target = 'weekly'
+
+                    # fallback: inspect channel/thread name
+                    if target is None:
+                        try:
+                            ch_name = (message.channel.name or '').lower()
+                            if 'viikko' in ch_name or 'week' in ch_name:
+                                target = 'weekly'
+                            elif 'pdga' in ch_name:
+                                target = 'pdga'
+                        except Exception:
+                            pass
+
+                    # default to weekly if still unknown (safer for !rek used in weekly threads)
+                    if target is None:
+                        target = 'weekly'
+
+                    if target == 'pdga':
+                        entries = [e for e in entries if is_pdga(e)]
+                    else:
+                        entries = [e for e in entries if not is_pdga(e)]
                 except Exception:
                     pass
 

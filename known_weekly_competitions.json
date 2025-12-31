@@ -1,15 +1,137 @@
 [
-  "3426494",
-  "3426501",
-  "3426518",
-  "3426512",
-  "3426489",
-  "3426514",
-  "3426511",
-  "3426381",
-  "3426507",
-  "3426497",
-  "3426521",
-  "3426504",
-  "3426509"
+  {
+    "id": "3523245",
+    "title": "FGK viikkarit 2026",
+    "tier": "Weekly",
+    "date": "01/01/26 - 12/31/26",
+    "location": "",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3523245"
+  },
+  {
+    "id": "3523248",
+    "title": "FGK viikkarit 2026 → vko 1 - Uimahallinpuisto",
+    "tier": "Weekly",
+    "date": "01/03/26 12:00",
+    "location": "Uimahallinpuisto Kauhajoki → 18 - Par 56 (2025)",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3523248"
+  },
+  {
+    "id": "3426381",
+    "title": "Luoma-ahon Lauantai Liiga",
+    "tier": "",
+    "date": "06/06/26 - 06/06/26",
+    "location": "Registration open",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3426381"
+  },
+  {
+    "id": "3426489",
+    "title": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 1 osakilpailu",
+    "tier": "",
+    "date": "06/06/26 14:00",
+    "location": "Luoma-ahon Frisbeegolfrata → 2 x PRO12 (viikkari)",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3426489"
+  },
+  {
+    "id": "3426494",
+    "title": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 2 osakilpailu",
+    "tier": "",
+    "date": "06/13/26 14:00",
+    "location": "Luoma-ahon Frisbeegolfrata → 2 x PRO12 (viikkari)",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3426494"
+  },
+  {
+    "id": "3426497",
+    "title": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 3 osakilpailu",
+    "tier": "",
+    "date": "06/27/26 14:00",
+    "location": "Luoma-ahon Frisbeegolfrata → 2 x PRO12 (viikkari)",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3426497"
+  },
+  {
+    "id": "3426501",
+    "title": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 4 osakilpailu",
+    "tier": "",
+    "date": "07/04/26 14:00",
+    "location": "Luoma-ahon Frisbeegolfrata → 2 x PRO12 (viikkari)",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3426501"
+  },
+  {
+    "id": "3426504",
+    "title": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 5 osakilpailu",
+    "tier": "",
+    "date": "07/11/26 14:00",
+    "location": "Luoma-ahon Frisbeegolfrata → 2 x PRO12 (viikkari)",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3426504"
+  },
+  {
+    "id": "3426507",
+    "title": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 6 osakilpailu",
+    "tier": "",
+    "date": "07/18/26 14:00",
+    "location": "Luoma-ahon Frisbeegolfrata → 2 x PRO12 (viikkari)",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3426507"
+  },
+  {
+    "id": "3426509",
+    "title": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 7 osakilpailu",
+    "tier": "",
+    "date": "07/25/26 14:00",
+    "location": "Luoma-ahon Frisbeegolfrata → 2 x PRO12 (viikkari)",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3426509"
+  },
+  {
+    "id": "3426511",
+    "title": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 8 osakilpailu",
+    "tier": "",
+    "date": "08/01/26 14:00",
+    "location": "Luoma-ahon Frisbeegolfrata → 2 x PRO12 (viikkari)",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3426511"
+  },
+  {
+    "id": "3426512",
+    "title": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 9 osakilpailu",
+    "tier": "",
+    "date": "08/08/26 14:00",
+    "location": "Luoma-ahon Frisbeegolfrata → 2 x PRO12 (viikkari)",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3426512"
+  },
+  {
+    "id": "3426514",
+    "title": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 10 osakilpailu",
+    "tier": "",
+    "date": "08/15/26 14:00",
+    "location": "Luoma-ahon Frisbeegolfrata → 2 x PRO12 (viikkari)",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3426514"
+  },
+  {
+    "id": "3426518",
+    "title": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 11 osakilpailu",
+    "tier": "",
+    "date": "08/22/26 14:00",
+    "location": "Luoma-ahon Frisbeegolfrata → 2 x PRO12 (viikkari)",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3426518"
+  },
+  {
+    "id": "3426521",
+    "title": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 12 osakilpailu",
+    "tier": "",
+    "date": "08/29/26 14:00",
+    "location": "Luoma-ahon Frisbeegolfrata → 2 x PRO12 (viikkari)",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3426521"
+  }
 ]

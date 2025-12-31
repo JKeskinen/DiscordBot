@@ -15,10 +15,12 @@ logging.getLogger('discord.gateway').setLevel(logging.INFO)
 
 # Load .env if present (optional helper from original)
 try:
-    from dotenv import load_dotenv
+    # Pylance may report missing import if python-dotenv isn't installed in the analysis
+    # environment; silence the analyzer while still attempting to load at runtime.
+    from dotenv import load_dotenv  # type: ignore[reportMissingImports]
     load_dotenv()
 except Exception:
-    # if python-dotenv not installed, ignore
+    # if python-dotenv not installed, ignore at runtime
     pass
 
 # Configuration copied from metrixbot.py
@@ -42,6 +44,42 @@ CHECK_REGISTRATION_INTERVAL = int(os.environ.get('CHECK_REGISTRATION_INTERVAL', 
 
 CACHE_FILE = os.environ.get('CACHE_FILE', 'known_pdga_competitions.json')
 REG_CHECK_FILE = os.environ.get('REG_CHECK_FILE', 'pending_registration.json')
+KNOWN_WEEKLY_FILE = os.environ.get('KNOWN_WEEKLY_FILE', 'known_weekly_competitions.json')
+KNOWN_DOUBLES_FILE = os.environ.get('KNOWN_DOUBLES_FILE', 'known_doubles_competitions.json')
+
+# -------------------------
+# Discord message formatting options
+# You can tweak these values here or set equivalent env vars to change behaviour.
+# - To remove dates from messages, set DISCORD_SHOW_DATE=0
+# - To change date output to DDMMYYYY, set DISCORD_DATE_FORMAT=DDMMYYYY
+# - To show/hide raw IDs, set DISCORD_SHOW_ID=1 or 0
+# - To show/hide location, set DISCORD_SHOW_LOCATION=1 or 0
+# - To increase spacing between lines in messages, set DISCORD_LINE_SPACING to 1 (single), 2 (double), etc.
+# Note: Discord does not support changing font size. Use spacing, bold or emojis to increase visual weight.
+# -------------------------
+DISCORD_SHOW_DATE = os.environ.get('DISCORD_SHOW_DATE', '1') == '1'
+DISCORD_DATE_FORMAT = os.environ.get('DISCORD_DATE_FORMAT', 'DD.MM.YYYY')  # or 'original'
+DISCORD_SHOW_ID = os.environ.get('DISCORD_SHOW_ID', '0') == '1'
+DISCORD_SHOW_LOCATION = os.environ.get('DISCORD_SHOW_LOCATION', '0') == '1'
+DISCORD_LINE_SPACING = max(1, int(os.environ.get('DISCORD_LINE_SPACING', '1')))
+
+def _format_date_field(raw_date: str) -> str:
+    """Try to extract a date like DD/MM/YY or DD/MM/YYYY from raw_date and format it.
+    Supported DISCORD_DATE_FORMAT: 'DDMMYYYY' or 'original'. Returns empty string if no date found.
+    """
+    if not raw_date:
+        return ''
+    # Find first date-like occurrence
+    m = re.search(r'(\d{1,2})/(\d{1,2})/(\d{2,4})', raw_date)
+    if not m:
+        return '' if DISCORD_DATE_FORMAT == 'DDMMYYYY' else raw_date
+    d, mo, y = m.groups()
+    if len(y) == 2:
+        y = '20' + y
+    d = d.zfill(2); mo = mo.zfill(2)
+    if DISCORD_DATE_FORMAT == 'DDMMYYYY':
+        return f"{d}{mo}{y}"
+    return f"{d}/{mo}/{y}"
 
 
 def _load_dotenv(path='.env'):
@@ -171,22 +209,67 @@ def run_once():
     def fmt_weekly_and_doubles(weeks, doubles, limit=20):
         lines = []
         for i, c in enumerate(weeks[:limit]):
+            # Build a single line for the competition based on configuration flags
             title = c.get('title') or c.get('name') or ''
-            cid = c.get('id') or ''
-            date = c.get('date') or ''
-            lines.append(f"- {cid} | {title} | {date}")
+            raw_date = c.get('date') or ''
+            date = _format_date_field(raw_date) if DISCORD_SHOW_DATE else ''
+            url = c.get('url') or ''
+            location = c.get('location') or ''
+
+            parts = []
+            if DISCORD_SHOW_ID:
+                cid = c.get('id') or ''
+                if cid:
+                    parts.append(str(cid))
+
+            # Title (link when URL available)
+            if url:
+                title_part = f"[{title}]({url})"
+            else:
+                title_part = title
+            parts.append(title_part)
+
+            # Optional location
+            if DISCORD_SHOW_LOCATION and location:
+                parts.append(location)
+
+            # Optional date (already formatted)
+            if date:
+                parts.append(date)
+
+            # Join with a readable separator and respect line spacing config
+            line = ' — '.join(p for p in parts if p)
+            lines.append(f"- {line}")
         if len(weeks) > limit:
             lines.append(f"...and {len(weeks)-limit} more weeklies")
         if doubles:
             lines.append('\nDoubles / pairs:')
             for d in doubles[:limit]:
                 title = d.get('title') or d.get('name') or ''
-                cid = d.get('id') or ''
-                date = d.get('date') or ''
-                lines.append(f"- {cid} | {title} | {date}")
+                raw_date = d.get('date') or ''
+                date = _format_date_field(raw_date) if DISCORD_SHOW_DATE else ''
+                url = d.get('url') or ''
+                location = d.get('location') or ''
+
+                parts = []
+                if DISCORD_SHOW_ID:
+                    cid = d.get('id') or ''
+                    if cid:
+                        parts.append(str(cid))
+                if url:
+                    parts.append(f"[{title}]({url})")
+                else:
+                    parts.append(title)
+                if DISCORD_SHOW_LOCATION and location:
+                    parts.append(location)
+                if date:
+                    parts.append(date)
+                lines.append(f"- {' — '.join(p for p in parts if p)}")
             if len(doubles) > limit:
                 lines.append(f"...and {len(doubles)-limit} more doubles")
-        return '\n'.join(lines) if lines else '(none)'
+        # Respect DISCORD_LINE_SPACING: number of newline characters between lines
+        sep = '\n' * DISCORD_LINE_SPACING
+        return sep.join(lines) if lines else '(none)'
 
     print('Run summary:\n' + f"PDGA: {pdga_count}, VIIKKOKISA: {weekly_count}, DOUBLES: {doubles_count}")
 
@@ -198,58 +281,89 @@ def run_once():
         print('DISCORD_TOKEN not set; skipping Discord posts')
         return
 
-    # Post PDGA summary using embeds grouped by tier for nicer appearance
+    # Post PDGA summary using embeds grouped by tier for only newly-discovered competitions
     try:
-        # group by tier if available, otherwise by first letter or 'Muut'
-        groups = {}
-        for c in pdga_list:
-            tier = (c.get('tier') or '').strip() or 'Muut'
-            groups.setdefault(tier, []).append(c)
+        def _unique_key(item) -> str:
+            # Accept dicts or primitive ids/urls saved previously
+            if not item and item != 0:
+                return ''
+            if isinstance(item, (str, int)):
+                return str(item)
+            # dict-like
+            try:
+                if item.get('id'):
+                    return str(item.get('id'))
+                if item.get('url'):
+                    return str(item.get('url'))
+                name = item.get('name') or item.get('title') or ''
+                date = item.get('date') or ''
+                return f"{name}|{date}".strip()
+            except Exception:
+                return str(item)
 
-        # build embeds (max 10 per message); each embed description uses markdown links
-        embeds = []
-        for tier, items in sorted(groups.items(), key=lambda x: x[0]):
-            t = (tier or '').strip()
-            # Normalize tier label: remove trailing 'PDGA' (and variants) to avoid duplicate 'PDGA' in title
-            norm = re.sub(r'(?i)\s*[-–—]\s*pdga$', '', t)
-            norm = re.sub(r'(?i)\bpdga\b$', '', norm).strip()
-            if not norm or norm.lower() == 'muut':
-                title = "Uusia PDGA-kisoja lisätty"
-            else:
-                # render single-letter tiers like 'C' or 'L' as 'C-tier' / 'L-tier'
-                display = norm
-                if len(norm) == 1 and norm.isalpha():
-                    display = f"{norm.upper()}-tier"
-                title = f"Uusia {display} kisoja lisätty"
-            lines = []
-            for it in items[:40]:
-                name = it.get('name') or it.get('title') or ''
-                url = it.get('url') or ''
-                # Show only the linked title (no date/time)
-                if url:
-                    lines.append(f"• [{name}]({url})")
+        # load known PDGA cache (if present)
+        try:
+            with open(os.path.join(base_dir, CACHE_FILE), 'r', encoding='utf-8') as f:
+                known_pdga = json.load(f) or []
+        except Exception:
+            known_pdga = []
+
+        known_keys = { _unique_key(x) for x in known_pdga }
+        new_pdga = [c for c in pdga_list if _unique_key(c) not in known_keys]
+
+        if new_pdga:
+            groups = {}
+            for c in new_pdga:
+                tier = (c.get('tier') or '').strip() or 'Muut'
+                groups.setdefault(tier, []).append(c)
+
+            embeds = []
+            for tier, items in sorted(groups.items(), key=lambda x: x[0]):
+                t = (tier or '').strip()
+                norm = re.sub(r'(?i)\s*[-–—]\s*pdga$', '', t)
+                norm = re.sub(r'(?i)\bpdga\b$', '', norm).strip()
+                if not norm or norm.lower() == 'muut':
+                    title = "Uusia PDGA-kisoja lisätty"
                 else:
-                    lines.append(f"• {name}")
-            if len(items) > 40:
-                lines.append(f"...and {len(items)-40} more")
-            embed = {
-                'title': title,
-                'description': "\n".join(lines) or '(none)',
-                'color': 16750848
-            }
-            embeds.append(embed)
-            if len(embeds) >= 10:
-                break
+                    display = norm
+                    if len(norm) == 1 and norm.isalpha():
+                        display = f"{norm.upper()}-tier"
+                    title = f"Uusia {display} kisoja lisätty"
+                lines = []
+                for it in items[:40]:
+                    name = it.get('name') or it.get('title') or ''
+                    url = it.get('url') or ''
+                    if url:
+                        lines.append(f"• [{name}]({url})")
+                    else:
+                        lines.append(f"• {name}")
+                if len(items) > 40:
+                    lines.append(f"...and {len(items)-40} more")
+                embed = {
+                    'title': title,
+                    'description': "\n".join(lines) or '(none)',
+                    'color': 16750848
+                }
+                embeds.append(embed)
+                if len(embeds) >= 10:
+                    break
 
-        if embeds:
-            post_embeds_to_discord(pdga_thread, token, embeds)
+            if embeds:
+                post_embeds_to_discord(pdga_thread, token, embeds)
+            else:
+                pdga_msg = f"UUSIA PDGA-KILPAILUJA LISÄTTY ({len(new_pdga)})\n\n" + fmt_pdga_list(new_pdga)
+                post_to_discord(pdga_thread, token, pdga_msg)
         else:
-            pdga_msg = f"UUSIA PDGA-KILPAILUJA LISÄTTY ({pdga_count})\n\n" + fmt_pdga_list(pdga_list)
-            post_to_discord(pdga_thread, token, pdga_msg)
+            print('No new PDGA competitions found; skipping PDGA post')
+
+        # Persist the current list as the known cache (overwrite)
+        try:
+            with open(os.path.join(base_dir, CACHE_FILE), 'w', encoding='utf-8') as f:
+                json.dump(pdga_list, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print('Failed to update PDGA cache file:', e)
     except Exception as e:
         print('Failed to build/send PDGA embeds:', e)
-        pdga_msg = f"UUSIA PDGA-KILPAILUJA LISÄTTY ({pdga_count})\n\n" + fmt_pdga_list(pdga_list)
-        post_to_discord(pdga_thread, token, pdga_msg)
 
     # Post weeklies + doubles as a single compact embed (falls back to plain text)
     def build_weekly_embed(weeks, doubles):
@@ -266,28 +380,53 @@ def run_once():
         title = " ja ".join(p for p in (week_part, double_part) if p) or f"VIIKKARIT ({len(weeks)}) ja PARIKISAT ({len(doubles)})"
         lines = []
         for c in weeks:
-            cid = c.get('id') or ''
             title_text = c.get('title') or c.get('name') or ''
-            date = c.get('date') or ''
+            raw_date = c.get('date') or ''
+            date = _format_date_field(raw_date) if DISCORD_SHOW_DATE else ''
             url = c.get('url') or ''
-            # Make the title a markdown link when URL available
+            location = c.get('location') or ''
+
+            parts = []
+            if DISCORD_SHOW_ID:
+                cid = c.get('id') or ''
+                if cid:
+                    parts.append(str(cid))
             if url:
-                lines.append(f"• [{title_text}]({url})")
+                parts.append(f"[{title_text}]({url})")
             else:
-                lines.append(f"• {title_text}")
+                parts.append(title_text)
+            if DISCORD_SHOW_LOCATION and location:
+                parts.append(location)
+            if date:
+                parts.append(date)
+
+            lines.append(f"• {' — '.join(p for p in parts if p)}")
 
         if doubles:
             lines.append('')
             lines.append('Parikisat:')
             for d in doubles:
-                cid = d.get('id') or ''
                 title_text = d.get('title') or d.get('name') or ''
-                date = d.get('date') or ''
+                raw_date = d.get('date') or ''
+                date = _format_date_field(raw_date) if DISCORD_SHOW_DATE else ''
                 url = d.get('url') or ''
+                location = d.get('location') or ''
+
+                parts = []
+                if DISCORD_SHOW_ID:
+                    cid = d.get('id') or ''
+                    if cid:
+                        parts.append(str(cid))
                 if url:
-                    lines.append(f"• [{title_text}]({url})")
+                    parts.append(f"[{title_text}]({url})")
                 else:
-                    lines.append(f"• {title_text}")
+                    parts.append(title_text)
+                if DISCORD_SHOW_LOCATION and location:
+                    parts.append(location)
+                if date:
+                    parts.append(date)
+
+                lines.append(f"• {' — '.join(p for p in parts if p)}")
 
         desc = "\n".join(lines) or '(none)'
         # Discord embed color: a neutral/blurple tone
@@ -299,12 +438,62 @@ def run_once():
         return embed
 
     try:
-        embed = build_weekly_embed(weekly_list, doubles_list)
-        posted = post_embeds_to_discord(weekly_thread, token, [embed])
-        if not posted:
-            # fallback to text
-            wd_msg = f"VIIKKARIT ({weekly_count}) ja PARIKISAT ({doubles_count})\n\n" + fmt_weekly_and_doubles(weekly_list, doubles_list)
-            post_to_discord(weekly_thread, token, wd_msg)
+        def _unique_key(item) -> str:
+            if not item and item != 0:
+                return ''
+            if isinstance(item, (str, int)):
+                return str(item)
+            try:
+                if item.get('id'):
+                    return str(item.get('id'))
+                if item.get('url'):
+                    return str(item.get('url'))
+                name = item.get('title') or item.get('name') or ''
+                date = item.get('date') or ''
+                return f"{name}|{date}".strip()
+            except Exception:
+                return str(item)
+
+        # load known weeklies and doubles
+        try:
+            with open(os.path.join(base_dir, KNOWN_WEEKLY_FILE), 'r', encoding='utf-8') as f:
+                known_weeklies = json.load(f) or []
+        except Exception:
+            known_weeklies = []
+
+        try:
+            with open(os.path.join(base_dir, KNOWN_DOUBLES_FILE), 'r', encoding='utf-8') as f:
+                known_doubles = json.load(f) or []
+        except Exception:
+            known_doubles = []
+
+        known_weekly_keys = { _unique_key(x) for x in known_weeklies }
+        known_double_keys = { _unique_key(x) for x in known_doubles }
+
+        new_weeklies = [w for w in weekly_list if _unique_key(w) not in known_weekly_keys]
+        new_doubles = [d for d in doubles_list if _unique_key(d) not in known_double_keys]
+
+        if new_weeklies or new_doubles:
+            embed = build_weekly_embed(new_weeklies, new_doubles)
+            posted = post_embeds_to_discord(weekly_thread, token, [embed])
+            if not posted:
+                wd_msg = f"VIIKKARIT ({len(new_weeklies)}) ja PARIKISAT ({len(new_doubles)})\n\n" + fmt_weekly_and_doubles(new_weeklies, new_doubles)
+                post_to_discord(weekly_thread, token, wd_msg)
+        else:
+            print('No new weekly or doubles competitions found; skipping weekly post')
+
+        # Persist known weeklies/doubles (overwrite with current lists)
+        try:
+            with open(os.path.join(base_dir, KNOWN_WEEKLY_FILE), 'w', encoding='utf-8') as f:
+                json.dump(weekly_list, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print('Failed to update known weekly file:', e)
+
+        try:
+            with open(os.path.join(base_dir, KNOWN_DOUBLES_FILE), 'w', encoding='utf-8') as f:
+                json.dump(doubles_list, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print('Failed to update known doubles file:', e)
     except Exception as e:
         print('Failed to build/send weekly embed:', e)
         wd_msg = f"VIIKKARIT ({weekly_count}) ja PARIKISAT ({doubles_count})\n\n" + fmt_weekly_and_doubles(weekly_list, doubles_list)
@@ -317,10 +506,29 @@ def main():
     parser.add_argument('--once', action='store_true', help='Run once and exit')
     parser.add_argument('--daemon', action='store_true', help='Run continuously')
     parser.add_argument('--presence', action='store_true', help='Start Discord gateway client to show bot as online (requires discord.py and valid token)')
-    parser.add_argument('--interval-minutes', type=float, default=float(os.environ.get('METRIX_INTERVAL_MINUTES', '1440')),
+    parser.add_argument('--interval-minutes', type=float, default=float(os.environ.get('METRIX_INTERVAL_MINUTES', '1')),
                         help='Interval between runs when --daemon (minutes)')
     parser.add_argument('--times', type=int, default=1, help='When used with --once, run the orchestrator this many times in sequence')
     args = parser.parse_args()
+
+    # If presence requested, start gateway client now (works for once/daemon modes)
+    presence_thread = None
+    if args.presence:
+        token = os.environ.get('DISCORD_TOKEN')
+        if not token:
+            print('DISCORD_TOKEN not set; skipping presence and command listener')
+        else:
+            try:
+                from hyvat_koodit.discord_presence import start_presence
+                # run_forever True for daemon mode; if --once, run_forever=False so it disconnects
+                presence_thread = start_presence(token, status_message=os.environ.get('DISCORD_STATUS', 'MetrixBot'), run_forever=not args.once)
+                try:
+                    from hyvat_koodit.command_handler import start_command_listener
+                    start_command_listener(token, prefix='!', run_forever=not args.once)
+                except Exception as e:
+                    print('Failed to start command listener:', e)
+            except Exception as e:
+                print('Failed to start presence thread:', e)
 
     if args.once:
         times = max(1, int(args.times or 1))
@@ -334,21 +542,6 @@ def main():
 
     if args.daemon:
         print('Starting metrixbot daemon; first run now')
-        presence_thread = None
-        if args.presence:
-            # start presence client using same DISCORD_TOKEN
-            token = os.environ.get('DISCORD_TOKEN')
-            try:
-                    from hyvat_koodit.discord_presence import start_presence
-                    presence_thread = start_presence(token, status_message=os.environ.get('DISCORD_STATUS', 'MetrixBot'), run_forever=True)
-                    # also start message command listener so bot responds to commands like !rek
-                    try:
-                        from hyvat_koodit.command_handler import start_command_listener
-                        start_command_listener(token, prefix='!', run_forever=True)
-                    except Exception as e:
-                        print('Failed to start command listener:', e)
-            except Exception as e:
-                print('Failed to start presence thread:', e)
         while True:
             try:
                 run_once()

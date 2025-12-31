@@ -12,6 +12,11 @@ except Exception:
 class PresenceThread(threading.Thread):
     def __init__(self, token, status_message=None, run_forever=True):
         super().__init__(daemon=True)
+        # normalize token if it was stored with surrounding quotes in .env
+        if isinstance(token, str):
+            token = token.strip()
+            if (token.startswith('"') and token.endswith('"')) or (token.startswith("'") and token.endswith("'")):
+                token = token[1:-1]
         self.token = token
         self.status_message = status_message or 'MetrixBot'
         self.run_forever = run_forever
@@ -32,6 +37,7 @@ class PresenceThread(threading.Thread):
                 activity = discord.Activity(type=discord.ActivityType.watching, name=self.status_message)
                 await client.change_presence(status=discord.Status.online, activity=activity)
                 print(f'Presence client connected as {client.user} — status set to online')
+                print('Connected')
             except Exception as e:
                 print('Failed to set presence:', e)
             if not self.run_forever:
@@ -45,6 +51,12 @@ class PresenceThread(threading.Thread):
 
 
 def start_presence(token: str, status_message: str = None, run_forever: bool = True):
+    # tolerate tokens with surrounding quotes from .env files
+    if isinstance(token, str):
+        token = token.strip()
+        if (token.startswith('"') and token.endswith('"')) or (token.startswith("'") and token.endswith("'")):
+            token = token[1:-1]
+
     if not token:
         print('No token provided for presence; skipping')
         return None

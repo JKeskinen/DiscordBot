@@ -2,6 +2,7 @@ import os
 import json
 import requests
 from bs4 import BeautifulSoup as BS
+from datetime import datetime, timedelta
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 PDGA_PATH = os.path.join(BASE_DIR, 'PDGA.json')
@@ -20,6 +21,18 @@ KEYWORDS_OPEN = [
     'register now',
 ]
 
+# Phrases indicating registration will open soon or on a specific date
+KEYWORDS_OPEN_SOON = [
+    'registration opens',
+    'opens on',
+    'opens',
+    'ilmoittautuminen avautuu',
+    'ilmoittautuminen aukeaa',
+    'avautuu pian',
+    'avautuu',
+    'avautuu'
+]
+
 def text_contains_open(text: str) -> bool:
     t = text.lower()
     for k in KEYWORDS_OPEN:
@@ -36,6 +49,8 @@ def check_competition(comp: dict) -> dict:
         'url': url,
         'kind': comp.get('kind') or comp.get('tier') or '',
         'registration_open': False,
+        'opening_soon': False,
+        'opens_in_days': None,
         'note': ''
     }
     if not url:
@@ -50,10 +65,63 @@ def check_competition(comp: dict) -> dict:
         soup = BS(r.text, 'html.parser')
         # Check visible page text first
         page_text = soup.get_text(separator=' ', strip=True)
+        # direct open
         if text_contains_open(page_text):
             result['registration_open'] = True
             result['note'] = 'keyword in page text'
             return result
+
+        # check for opening-soon phrases with dates (e.g. "registration opens 01/03/26")
+        lowered = page_text.lower()
+        for kw in KEYWORDS_OPEN_SOON:
+            if kw in lowered:
+                # attempt to find a date near the keyword
+                # date patterns: DD/MM/YY or DD/MM/YYYY or YYYY-MM-DD
+                m = None
+                # search for date after keyword
+                try:
+                    idx = lowered.find(kw)
+                    snippet = lowered[idx: idx+80]
+                    m = re.search(r"(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})", snippet)
+                    if not m:
+                        # try ISO-like date elsewhere on page
+                        m = re.search(r"(\d{4})-(\d{2})-(\d{2})", lowered)
+                except Exception:
+                    m = None
+                if m:
+                    # parse matched date
+                    try:
+                        if len(m.groups()) == 3:
+                            g1, g2, g3 = m.groups()
+                            if len(g1) == 4:  # YYYY-MM-DD
+                                year = int(g1); month = int(g2); day = int(g3)
+                            else:
+                                day = int(g1); month = int(g2); year = int(g3)
+                                if year < 100:
+                                    year += 2000
+                            dt = datetime(year, month, day)
+                            delta = (dt.date() - datetime.utcnow().date()).days
+                            result['opens_in_days'] = delta
+                            if delta <= 0:
+                                # already opened
+                                result['registration_open'] = True
+                                result['note'] = 'opened (date found)'
+                                return result
+                            if delta <= 7:
+                                result['opening_soon'] = True
+                                result['note'] = f'opens in {delta} days'
+                                return result
+                            # found a distant opening date -> note it but not 'soon'
+                            result['note'] = f'opens on {dt.date()}'
+                            return result
+                    except Exception:
+                        pass
+                else:
+                    # phrase present without date -> mark opening_soon True
+                    if any(p in lowered for p in ['soon', 'pian', 'avautuu', 'avautuu pian']):
+                        result['opening_soon'] = True
+                        result['note'] = 'opening soon (phrase found)'
+                        return result
         # Look for register links/buttons
         for a in soup.select('a'):
             href = (a.get('href') or '').lower()

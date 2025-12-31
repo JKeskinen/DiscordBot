@@ -52,26 +52,37 @@ def chunk(items, n):
 
 
 def build_embeds(items):
+    # Deprecated: kept for compatibility but prefer build_embeds_with_title below
+    return build_embeds_with_title(items, f"REKISTERÖINTI AVOINNA ({len(items)})", 16753920)
+
+
+def build_embeds_with_title(items, title, color):
     embeds = []
-    total = len(items)
-    title = f"REKISTERÖINTI AVOINNA ({total})"
-    color = 16753920
-    if total == 0:
-        embeds.append({'title': title, 'description': '(ei avoimia ilmoittautumisia)', 'color': color})
+    if not items:
+        embeds.append({'title': title, 'description': '(ei ilmoituksia)', 'color': color})
         return embeds
+    first_title = title
     for part in chunk(items, MAX_ITEMS_PER_EMBED):
         lines = []
         for it in part:
             name = it.get('name') or it.get('title') or it.get('id')
             url = it.get('url') or ''
+            extra = ''
+            # include opens_in_days if present for 'opening soon' items
+            if it.get('opens_in_days') is not None and not it.get('registration_open'):
+                try:
+                    d = int(it.get('opens_in_days'))
+                    if d > 0:
+                        extra = f" — avautuu {d} pv"  # Finnish: opens in X days
+                except Exception:
+                    pass
             if url:
-                lines.append(f"• [{name}]({url})")
+                lines.append(f"• [{name}]({url}){extra}")
             else:
-                lines.append(f"• {name}")
-        embed = {'title': title, 'description': '\n'.join(lines), 'color': color}
+                lines.append(f"• {name}{extra}")
+        embed = {'title': first_title, 'description': '\n'.join(lines), 'color': color}
         embeds.append(embed)
-        # after the first embed, shorten title to avoid repetition
-        title = ' '  # small blank title for subsequent embeds
+        first_title = ' '
     return embeds
 
 
@@ -143,26 +154,53 @@ if __name__ == '__main__':
     # PDGA
     to_post_pdga = pdga if not known_pdga else new_pdga
     if to_post_pdga:
-        embeds = build_embeds(to_post_pdga)
-        if post_embeds(PDGA_THREAD, embeds):
-            # update known ids
-            known_pdga.update(pdga_ids)
-            save_known(KNOWN_PDGA, known_pdga)
-            print(f'Posted PDGA: {len(to_post_pdga)} items')
-        else:
-            print('Failed to post PDGA embeds')
+        # split into currently open and opening soon
+        pdga_open = [it for it in to_post_pdga if it.get('registration_open')]
+        pdga_soon = [it for it in to_post_pdga if (not it.get('registration_open')) and it.get('opening_soon')]
+
+        # Post open now
+        if pdga_open:
+            embeds = build_embeds_with_title(pdga_open, f"REKISTERÖINTI AVOINNA ({len(pdga_open)})", 5763714)
+            if post_embeds(PDGA_THREAD, embeds):
+                print(f'Posted PDGA open now: {len(pdga_open)} items')
+            else:
+                print('Failed to post PDGA open-now embeds')
+
+        # Post opening soon
+        if pdga_soon:
+            embeds = build_embeds_with_title(pdga_soon, f"REKISTERÖINTI AVAUTUU PIAN ({len(pdga_soon)})", 16750848)
+            if post_embeds(PDGA_THREAD, embeds):
+                print(f'Posted PDGA opening soon: {len(pdga_soon)} items')
+            else:
+                print('Failed to post PDGA opening-soon embeds')
+
+        # update known ids after posting both lists
+        known_pdga.update(pdga_ids)
+        save_known(KNOWN_PDGA, known_pdga)
     else:
         print('No new PDGA items to post')
 
     # Weekly + doubles
     to_post_weekly = weekly if not known_weekly else new_weekly
     if to_post_weekly:
-        embeds = build_embeds(to_post_weekly)
-        if post_embeds(WEEKLY_THREAD, embeds):
-            known_weekly.update(weekly_ids)
-            save_known(KNOWN_WEEKLY, known_weekly)
-            print(f'Posted weekly/doubles: {len(to_post_weekly)} items')
-        else:
-            print('Failed to post weekly embeds')
+        weekly_open = [it for it in to_post_weekly if it.get('registration_open')]
+        weekly_soon = [it for it in to_post_weekly if (not it.get('registration_open')) and it.get('opening_soon')]
+
+        if weekly_open:
+            embeds = build_embeds_with_title(weekly_open, f"REKISTERÖINTI AVOINNA ({len(weekly_open)})", 5763714)
+            if post_embeds(WEEKLY_THREAD, embeds):
+                print(f'Posted weekly open now: {len(weekly_open)} items')
+            else:
+                print('Failed to post weekly open-now embeds')
+
+        if weekly_soon:
+            embeds = build_embeds_with_title(weekly_soon, f"REKISTERÖINTI AVAUTUU PIAN ({len(weekly_soon)})", 16750848)
+            if post_embeds(WEEKLY_THREAD, embeds):
+                print(f'Posted weekly opening soon: {len(weekly_soon)} items')
+            else:
+                print('Failed to post weekly opening-soon embeds')
+
+        known_weekly.update(weekly_ids)
+        save_known(KNOWN_WEEKLY, known_weekly)
     else:
         print('No new weekly/doubles items to post')

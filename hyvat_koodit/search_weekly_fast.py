@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup as BS
 import re
 import urllib.parse
 import os
+from . import data_store
 import time
 import json
 
@@ -124,10 +125,9 @@ print('Counts by kind:', dict(kcounts))
 wk_count = sum(1 for r in unique if r.get('kind') == 'VIIKKOKISA')
 print(f"VIIKKOKISA after defaulting: {wk_count}")
 try:
-    out_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'VIIKKOKISA.json'))
-    with open(out_path, 'w', encoding='utf-8') as f:
-        json.dump([r for r in unique if r.get('kind') == 'VIIKKOKISA'], f, ensure_ascii=False, indent=2)
-    print(f"Saved VIIKKOKISA.json with {wk_count} entries to {out_path}")
+    # Persist using centralized data_store (keeps filename VIIKKOKISA.json by default)
+    entries = [r for r in unique if r.get('kind') == 'VIIKKOKISA']
+    data_store.save_category('VIIKKOKISA', entries)
 except Exception as e:
     print(f"Failed to save VIIKKOKISA.json: {e}")
 

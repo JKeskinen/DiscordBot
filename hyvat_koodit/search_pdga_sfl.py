@@ -5,6 +5,7 @@ import urllib.parse
 import os
 import time
 import json
+from . import data_store
 import argparse
 
 # Default SFL "Kaikki kilpailut" URL (user-provided)
@@ -169,10 +170,12 @@ def is_pdga_entry(entry: dict) -> bool:
 
 
 def save_pdga_list(entries, out_path):
+    # Use centralized data_store to persist PDGA list. Keep out_path if provided.
     try:
-        with open(out_path, "w", encoding="utf-8") as f:
-            json.dump(entries, f, ensure_ascii=False, indent=2)
-        print(f"Saved {len(entries)} PDGA entries to {out_path}")
+        if out_path:
+            data_store.save_category('PDGA', entries, out_path)
+        else:
+            data_store.save_category('PDGA', entries)
     except Exception as e:
         print(f"Failed to save PDGA JSON: {e}")
 

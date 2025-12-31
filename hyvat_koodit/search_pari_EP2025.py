@@ -71,13 +71,13 @@ def find_doubles(area_name=None, date1='2026-01-01', date2='2027-01-01'):
 
 def save_doubles_list(entries, out_path=None):
     import json, os
+    from . import data_store
     if not out_path:
         base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         out_path = os.path.join(base_dir, 'DOUBLES.json')
     try:
-        with open(out_path, 'w', encoding='utf-8') as f:
-            json.dump(entries, f, ensure_ascii=False, indent=2)
-        print(f"Saved {len(entries)} doubles entries to {out_path}")
+        # Use centralized data_store to persist doubles list
+        data_store.save_category('DOUBLES', entries, out_path)
     except Exception as e:
         print(f"Failed to save DOUBLES JSON: {e}")
 
