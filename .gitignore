@@ -1,0 +1,39 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# PyInstaller
+*.manifest
+*.spec
+
+# VS Code
+.vscode/
+
+# Env files
+.env
+
+# Misc
+output/
+Omia projekteja/Excel-laskuri/output/
+
+# Ignore compiled Python files
+*.pyc
+
+# Ignore sibling/parent project folders that show up as ../ paths in status
+../Omia projekteja/
+../Titetenttaaja_github/
