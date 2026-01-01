@@ -332,13 +332,22 @@ class CommandListenerThread(threading.Thread):
                 # --- !help: competition-related commands ---
                 if command == 'help':
                     try:
-                        help_lines = [
-                            "Kilpailukomennot:",
-                            "!rek — näytä avoimet rekisteröinnit (PDGA / viikon kilpailut)",
-                            "!etsi <hakusana> — etsi kilpailuja nimen/alueen/radan perusteella",
-                            "!spots — tarkista kilpailujen jäljellä olevat paikat (alle 20 ilmoittaa)",
-                        ]
-                        await message.channel.send('\n'.join(help_lines))
+                        title = 'LakeusBotti — APPI — 3.06'
+                        desc = (
+                            'Kilpailukomennot:\n'
+                            '\n'
+                            '!rek — näytä avoimet rekisteröinnit (PDGA / viikon kilpailut)\n'
+                            '!etsi <hakusana> — etsi kilpailuja nimen/alueen/radan perusteella\n'
+                            '!spots — tarkista kilpailujen jäljellä olevat paikat (alle 20 ilmoittaa)'
+                        )
+                        Embed_cls = getattr(discord, 'Embed', None)
+                        if Embed_cls:
+                            embed = Embed_cls(title=title, description=desc)
+                            embed.set_footer(text='Käytä komentoja kirjoittamalla viestiin esimerkiksi: !rek')
+                            await message.channel.send(embed=embed)
+                        else:
+                            # fallback to a concise plain text message
+                            await message.channel.send(f"**{title}**\n" + desc)
                     except Exception:
                         pass
                     return

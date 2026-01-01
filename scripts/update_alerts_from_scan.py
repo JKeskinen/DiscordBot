@@ -82,9 +82,10 @@ def main():
         # keep item in scan results
         remaining_scan.append(item)
 
-        # only raise alerts when remaining is known and limit exists
+        # only raise alerts when remaining is known, limit exists,
+        # and remaining is between 1 and the configured threshold
         if isinstance(rem, int) and lim is not None and isinstance(lim, int):
-            if rem <= THRESHOLD and not skip_due_to_queue:
+            if rem > 0 and rem <= THRESHOLD and not skip_due_to_queue:
                 alerts.append({
                     'id': item.get('id'),
                     'title': item.get('name') or item.get('title'),
