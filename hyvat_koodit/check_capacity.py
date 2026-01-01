@@ -109,7 +109,7 @@ def _find_tjing_link(soup: BS, page_text: str, base_url: str = '') -> str:
     # Look for anchor hrefs that point to tjing
     try:
         for a in soup.find_all('a', href=True):
-            href = a['href']
+            href = str(a.get('href') or '')
             if 'tjing.' in href:
                 # make absolute if needed
                 if href.startswith('http'):
@@ -120,11 +120,11 @@ def _find_tjing_link(soup: BS, page_text: str, base_url: str = '') -> str:
     except Exception:
         pass
     # also try to find a raw URL in text
-    m = re.search(r'https?://[\w./-]*tjing\.[\w/\-?=&%]+', page_text)
+    m = re.search(r'https?://[\w./-]*tjing\.[\w/\-?=&%]+', str(page_text))
     if m:
         return m.group(0)
     # look for non-protocol tjing mentions (e.g. "tjing.fi/event/..." or plain tjing root)
-    m2 = re.search(r'(?:https?://)?(?:www\.)?tjing\.(?:fi|se|no|com)[^\s"\'"<>]*', page_text, re.I)
+    m2 = re.search(r'(?:https?://)?(?:www\.)?tjing\.(?:fi|se|no|com)[^\s"\'"<>]*', str(page_text), re.I)
     if m2:
         raw = m2.group(0)
         if raw.startswith('http'):
@@ -136,14 +136,14 @@ def _find_tjing_link(soup: BS, page_text: str, base_url: str = '') -> str:
     try:
         for a in soup.find_all(True):
             for attr in ('onclick', 'data-href', 'data-url', 'data-registration', 'data-target'):
-                val = a.get(attr)
+                val = str(a.get(attr) or '')
                 if val and 'tjing.' in val:
                     m3 = re.search(r'https?://[\w./-]*tjing\.[\w/\-?=&%]+', val)
                     if m3:
                         return m3.group(0)
                     # fallback: return raw value as possible path
                     if 'tjing.' in val:
-                        return ('https://' + val) if not val.startswith('http') else val
+                        return ('https://' + val.lstrip('/')) if not val.startswith('http') else val
     except Exception:
         pass
     return ''
@@ -157,7 +157,7 @@ def _discover_tjing_event_from_metrix(metrix_url: str, soup: BS, page_text: str,
     # look for explicit event paths in anchors
     try:
         for a in soup.find_all('a', href=True):
-            href = a['href']
+            href = str(a.get('href') or '')
             if 'tjing.' in href and ('/event/' in href or '/e/' in href or '/events/' in href):
                 if href.startswith('http'):
                     return href
@@ -170,7 +170,7 @@ def _discover_tjing_event_from_metrix(metrix_url: str, soup: BS, page_text: str,
         pass
 
     # search raw page text for event path
-    m = re.search(r'https?://[\w./-]*tjing\.[\w/\-?=&%]*?(?:/event/|/e/)[\w\-\d]+', page_text)
+    m = re.search(r'https?://[\w./-]*tjing\.[\w/\-?=&%]*?(?:/event/|/e/)[\w\-\d]+', str(page_text))
     if m:
         return m.group(0)
 
@@ -185,7 +185,7 @@ def _discover_tjing_event_from_metrix(metrix_url: str, soup: BS, page_text: str,
             anchors = page.query_selector_all('a')
             for a in anchors:
                 try:
-                    href = a.get_attribute('href') or ''
+                    href = str(a.get_attribute('href') or '')
                     if href and 'tjing.' in href and ('/event/' in href or '/e/' in href or '/events/' in href):
                         if href.startswith('http'):
                             browser.close()
@@ -201,6 +201,291 @@ def _discover_tjing_event_from_metrix(metrix_url: str, soup: BS, page_text: str,
     except Exception:
         pass
     return ''
+
+
+def _check_registration_start_in_future(text: str):
+    try:
+        st_pat = [
+            r'Rekisteröityminen alkaa[:\s]*([0-3]?\d[.\-/][01]?\d[.\-/]\d{4}(?:\s+\d{1,2}:\d{2})?)',
+            r'Ilmoittautuminen alkaa[:\s]*([0-3]?\d[.\-/][01]?\d[.\-/]\d{4}(?:\s+\d{1,2}:\d{2})?)',
+            r'Registration starts[:\s]*([0-3]?\d[.\-/][01]?\d[.\-/]\d{4}(?:\s+\d{1,2}:\d{2})?)',
+            r'Registrering startar[:\s]*([0-3]?\d[.\-/][01]?\d[.\-/]\d{4}(?:\s+\d{1,2}:\d{2})?)'
+        ]
+        for pat in st_pat:
+            m = re.search(pat, text, re.I)
+            if m:
+                date_str = m.group(1)
+                try:
+                    parts = date_str.split()
+                    dpart = parts[0]
+                    tpart = parts[1] if len(parts) > 1 else '00:00'
+                    sep = '.' if '.' in dpart else ('-' if '-' in dpart else '/')
+                    dfields = dpart.split(sep)
+                    day = int(dfields[0]); month = int(dfields[1]); year = int(dfields[2])
+                    hh, mm = (0, 0)
+                    if ':' in tpart:
+                        hh, mm = [int(x) for x in tpart.split(':')[:2]]
+                    start_dt = datetime(year, month, day, hh, mm)
+                    if start_dt > datetime.now():
+                        return {'registered': None, 'limit': None, 'remaining': None, 'note': 'registration-not-open', 'start': start_dt.isoformat()}
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return None
+
+
+def _extract_json_confirmed_capacity(text: str):
+    try:
+        m_confirmed = re.search(r'"confirmed"\s*:\s*(\d{1,4})', text)
+        if not m_confirmed:
+            return None
+        m_capacity = re.search(r'"capacity"\s*:\s*(\d{1,4})', text)
+        m_max = re.search(r'"maxPlayers"\s*:\s*(\d{1,4})', text)
+        if not (m_capacity or m_max):
+            return None
+        try:
+            reg = int(m_confirmed.group(1))
+        except Exception:
+            return None
+        if m_capacity:
+            try:
+                lim = int(m_capacity.group(1))
+            except Exception:
+                return None
+        else:
+            try:
+                lim = int(m_max.group(1))
+            except Exception:
+                return None
+        return {'registered': reg, 'limit': lim, 'remaining': lim - reg, 'note': 'tjing-direct-json'}
+    except Exception:
+        pass
+    return None
+
+
+def _parse_labelled_b_blocks(soup: BS):
+    try:
+        b_tags = soup.find_all('b')
+        parsed_limit = None
+        parsed_remaining = None
+        for b in b_tags:
+            parts = [s.strip() for s in b.stripped_strings]
+            if not parts:
+                continue
+            num = None
+            if parts and re.match(r'^\d{1,4}$', parts[0]):
+                num = int(parts[0])
+            label = ' '.join(parts[1:]).lower() if len(parts) > 1 else ''
+            if not label:
+                span = b.find('span')
+                if span is not None:
+                    label = (span.get_text(strip=True) or '').lower()
+            if num is not None and label:
+                if 'max' in label or 'max spots' in label or 'maxim' in label or 'maxspelare' in label:
+                    parsed_limit = num
+                if 'available' in label or 'available spots' in label or 'slots left' in label or 'lediga' in label or 'paikkoja' in label:
+                    parsed_remaining = num
+        if parsed_limit is not None or parsed_remaining is not None:
+            reg_val = None
+            lim_val = parsed_limit
+            rem_val = parsed_remaining
+            if lim_val is not None and rem_val is not None:
+                reg_val = lim_val - rem_val
+            return {'registered': reg_val, 'limit': lim_val, 'remaining': rem_val, 'note': 'tjing-labelled-b'}
+    except Exception:
+        pass
+    return None
+
+
+def _extract_slots_text(page_text: str):
+    try:
+        m_spel = re.search(r"(\d{1,4})\s*(?:bekräftade|bekräftade spelare|spelare|deltagare)", page_text, re.I)
+        m_cap = re.search(r"(\d{1,4})\s*(?:max|maximalt|kapacitet|platser|maxspelare|maxPlayers|capacity)", page_text, re.I)
+        if m_spel is None and m_cap is None:
+            return None
+        reg = None
+        lim = None
+        if m_spel:
+            try:
+                reg = int(m_spel.group(1))
+            except Exception:
+                reg = None
+        if m_cap:
+            try:
+                lim = int(m_cap.group(1))
+            except Exception:
+                lim = None
+        if reg is not None and lim is not None:
+            return {'registered': reg, 'limit': lim, 'remaining': lim - reg, 'note': 'tjing-direct-text'}
+        if reg is not None and lim is None:
+            return {'registered': reg, 'limit': None, 'remaining': None, 'note': 'tjing-registered'}
+    except Exception:
+        pass
+    return None
+
+
+def _extract_remaining_jsonlike(text: str):
+    try:
+        m_remaining_json = re.search(r'"remaining"\s*:\s*(\d{1,4})', text)
+        m_remaining_alt = re.search(r'"remainingSlots"\s*:\s*(\d{1,4})', text)
+        m_available = re.search(r'"available"\s*:\s*(\d{1,4})', text)
+        if m_remaining_json:
+            try:
+                rem_val = int(m_remaining_json.group(1))
+                return {'registered': None, 'limit': None, 'remaining': rem_val, 'note': 'tjing-remaining-json'}
+            except Exception:
+                pass
+        if m_remaining_alt:
+            try:
+                rem_val = int(m_remaining_alt.group(1))
+                return {'registered': None, 'limit': None, 'remaining': rem_val, 'note': 'tjing-remaining-json'}
+            except Exception:
+                pass
+        if m_available:
+            try:
+                rem_val = int(m_available.group(1))
+                return {'registered': None, 'limit': None, 'remaining': rem_val, 'note': 'tjing-remaining-json'}
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return None
+
+
+def _playwright_tjing_fallback(tjing_url: str, timeout: int = 10):
+    if sync_playwright is None:
+        return None
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            page.goto(tjing_url, timeout=timeout * 1000)
+            state = None
+            try:
+                state = page.evaluate("() => (window.__INITIAL_STATE__ || window.__INITIAL_DATA__ || window.__INITIAL || null)")
+            except Exception:
+                state = None
+            content = page.content()
+            body_text = page.inner_text('body') if page.query_selector('body') else ''
+            browser.close()
+
+        # check state dict for keys
+        if isinstance(state, dict):
+            def deep_find(obj, keys):
+                if isinstance(obj, dict):
+                    for k, v in obj.items():
+                        if k in keys and isinstance(v, int):
+                            return v
+                        res = deep_find(v, keys)
+                        if res is not None:
+                            return res
+                elif isinstance(obj, list):
+                    for it in obj:
+                        res = deep_find(it, keys)
+                        if res is not None:
+                            return res
+                return None
+
+            reg_s = deep_find(state, ('confirmed', 'confirmedPlayers', 'playersConfirmed', 'registered'))
+            lim_s = deep_find(state, ('capacity', 'maxPlayers', 'max', 'slots', 'capacityLimit'))
+            if reg_s is not None or lim_s is not None:
+                rem = None
+                if reg_s is not None and lim_s is not None:
+                    rem = int(lim_s) - int(reg_s)
+                return {'registered': reg_s, 'limit': lim_s, 'remaining': rem, 'note': 'tjing-playwright-state'}
+
+        # phrase search in rendered content
+        try:
+            soup_try_phrase = BS(content or '', 'html.parser')
+            whole_text = soup_try_phrase.get_text(" ", strip=True)
+            phrase_patterns = (
+                r'Maximum number of players[:\s]*([0-9]{1,3})',
+                r'Maximum number of competitors[:\s]*([0-9]{1,3})',
+                r'Max participants[:\s]*([0-9]{1,3})',
+                r'Maksimi(?: osallistujamäärä| osallistujamäärä)[:\s]*([0-9]{1,3})',
+                r'Maksimi(?: osallistujat| osallistujamäärä)[:\s]*([0-9]{1,3})',
+                r'Suurin osallistujamäärä[:\s]*([0-9]{1,3})',
+                r'Enintään[:\s]*([0-9]{1,3})\s*(?:pelaaj|pelaajaa|osallistuja)'
+            )
+            found_lim = None
+            for pat in phrase_patterns:
+                mlim = re.search(pat, whole_text, re.I)
+                if mlim:
+                    try:
+                        val = int(mlim.group(1))
+                        if 0 <= val < 1000:
+                            found_lim = val
+                            break
+                    except Exception:
+                        continue
+
+            if found_lim is not None:
+                reg_patterns = (r'Registered[:\s]*([0-9]{1,4})', r'Ilmoittautuneet[:\s]*([0-9]{1,4})', r'Registrations[:\s]*([0-9]{1,4})')
+                found_reg = None
+                for rpat in reg_patterns:
+                    mreg = re.search(rpat, whole_text, re.I)
+                    if mreg:
+                        try:
+                            found_reg = int(mreg.group(1))
+                            break
+                        except Exception:
+                            pass
+                if found_reg is None:
+                    found_reg = 0
+                rem_calc = None
+                try:
+                    rem_calc = int(found_lim) - int(found_reg)
+                except Exception:
+                    rem_calc = None
+                return {'registered': found_reg, 'limit': found_lim, 'remaining': rem_calc, 'note': 'metrix-direct-phrase'}
+        except Exception:
+            pass
+
+        # rendered row heuristics
+        try:
+            soup_r = BS(content or '', 'html.parser')
+            candidates = []
+            for tr in soup_r.find_all('tr'):
+                bnums = []
+                for b in tr.find_all('b'):
+                    t = (b.get_text(strip=True) or '').strip()
+                    if re.match(r'^\d{1,4}$', t):
+                        try:
+                            bnums.append(int(t))
+                        except Exception:
+                            pass
+                if len(bnums) >= 2:
+                    tr_text = tr.get_text(' ', strip=True).lower()
+                    candidates.append((tr_text, bnums))
+            preferred_keywords = ('total', 'yhteensä', 'yhteensa', 'rekister', 'ilmoittau', 'määrä', 'summa', 'totalen', 'totalt', 'max')
+            for txt, bnums in candidates:
+                if len(bnums) > 1 and (bnums[1] is None or bnums[1] >= 1000):
+                    continue
+                if any(k in txt for k in preferred_keywords):
+                    reg_val = bnums[0]
+                    lim_val = bnums[1]
+                    rem_val = (lim_val - reg_val) if (lim_val is not None and reg_val is not None) else None
+                    return {'registered': reg_val, 'limit': lim_val, 'remaining': rem_val, 'note': 'metrix-playwright-row-summary'}
+            if candidates:
+                sane = [c for c in candidates if len(c[1])>1 and c[1][1] < 1000]
+                if sane:
+                    best = max(sane, key=lambda it: it[1][1])
+                    bnums = best[1]
+                    reg_val = bnums[0]
+                    lim_val = bnums[1]
+                    rem_val = (lim_val - reg_val) if (lim_val is not None and reg_val is not None) else None
+                    return {'registered': reg_val, 'limit': lim_val, 'remaining': rem_val, 'note': 'metrix-playwright-row-bestcandidate'}
+            # labelled b fallback
+            lbl = _parse_labelled_b_blocks(soup_r)
+            if lbl:
+                return lbl
+        except Exception:
+            pass
+
+    except Exception as e:
+        logger.exception('Playwright TJing fallback failed: %s', e)
+    return None
 
 
 def fetch_tjing_capacity(tjing_url: str, timeout=10):
@@ -219,42 +504,13 @@ def fetch_tjing_capacity(tjing_url: str, timeout=10):
         text = r.text
         # quick check: if the static page shows registration-start in the future,
         # skip extraction early
-        try:
-            st_pat = [
-                r'Rekisteröityminen alkaa[:\s]*([0-3]?\d[.\-/][01]?\d[.\-/]\d{4}(?:\s+\d{1,2}:\d{2})?)',
-                r'Ilmoittautuminen alkaa[:\s]*([0-3]?\d[.\-/][01]?\d[.\-/]\d{4}(?:\s+\d{1,2}:\d{2})?)',
-                r'Registration starts[:\s]*([0-3]?\d[.\-/][01]?\d[.\-/]\d{4}(?:\s+\d{1,2}:\d{2})?)',
-                r'Registrering startar[:\s]*([0-3]?\d[.\-/][01]?\d[.\-/]\d{4}(?:\s+\d{1,2}:\d{2})?)'
-            ]
-            for pat in st_pat:
-                m = re.search(pat, text, re.I)
-                if m:
-                    date_str = m.group(1)
-                    try:
-                        parts = date_str.split()
-                        dpart = parts[0]
-                        tpart = parts[1] if len(parts) > 1 else '00:00'
-                        sep = '.' if '.' in dpart else ('-' if '-' in dpart else '/')
-                        dfields = dpart.split(sep)
-                        day = int(dfields[0]); month = int(dfields[1]); year = int(dfields[2])
-                        hh, mm = (0, 0)
-                        if ':' in tpart:
-                            hh, mm = [int(x) for x in tpart.split(':')[:2]]
-                        start_dt = datetime(year, month, day, hh, mm)
-                        if start_dt > datetime.now():
-                            return {'registered': None, 'limit': None, 'remaining': None, 'note': 'registration-not-open', 'start': start_dt.isoformat()}
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        start_future = _check_registration_start_in_future(text)
+        if start_future:
+            return start_future
         # try JSON-like patterns
-        m_confirmed = re.search(r'"confirmed"\s*:\s*(\d{1,4})', text)
-        m_capacity = re.search(r'"capacity"\s*:\s*(\d{1,4})', text)
-        m_max = re.search(r'"maxPlayers"\s*:\s*(\d{1,4})', text)
-        if m_confirmed and (m_capacity or m_max):
-            reg = int(m_confirmed.group(1))
-            lim = int(m_capacity.group(1)) if m_capacity else int(m_max.group(1))
-            return {'registered': reg, 'limit': lim, 'remaining': lim - reg, 'note': 'tjing-direct-json'}
+        json_res = _extract_json_confirmed_capacity(text)
+        if json_res:
+            return json_res
 
         # parse visible text (Swedish keywords) and check for labelled <b><span> patterns
         soup = BS(text, 'html.parser')
@@ -305,12 +561,13 @@ def fetch_tjing_capacity(tjing_url: str, timeout=10):
             for p in phrases:
                 node = soup.find(string=re.compile(p, re.I))
                 if node:
-                    parent = node.parent
-                    txt = parent.get_text(' ', strip=True)
-                    nums = re.findall(r'(\d{1,4})', txt)
-                    if nums:
-                        metrix_limit = int(nums[-1])
-                        break
+                    parent = getattr(node, 'parent', None)
+                    if parent is not None:
+                        txt = parent.get_text(' ', strip=True)
+                        nums = re.findall(r'(\d{1,4})', txt)
+                        if nums:
+                            metrix_limit = int(nums[-1])
+                            break
             if metrix_limit is not None:
                 # try to locate registered count; if none, default to 0
                 mreg = re.search(r'(?:registered|ilmoittautuneet|rekisteröityneet|rekisteröityneet|registered players|registered on)[:\s]*?(\d{1,4})', page_text, re.I)
@@ -346,12 +603,13 @@ def fetch_tjing_capacity(tjing_url: str, timeout=10):
             for p in phrases:
                 node = soup.find(string=re.compile(p, re.I))
                 if node:
-                    parent = node.parent
-                    txt = parent.get_text(' ', strip=True)
-                    nums = re.findall(r'(\d{1,4})', txt)
-                    if nums:
-                        metrix_limit = int(nums[-1])
-                        break
+                    parent = getattr(node, 'parent', None)
+                    if parent is not None:
+                        txt = parent.get_text(' ', strip=True)
+                        nums = re.findall(r'(\d{1,4})', txt)
+                        if nums:
+                            metrix_limit = int(nums[-1])
+                            break
             # if we found a metrix limit, attempt to find registered count nearby or default to 0
             if metrix_limit is not None:
                 # try to find explicit registered count in page text
@@ -463,45 +721,13 @@ def fetch_tjing_capacity(tjing_url: str, timeout=10):
             pass
 
         # check for labelled <b> blocks like: <b>72 <span>Max spots</span></b>
-        try:
-            b_tags = soup.find_all('b')
-            parsed_limit = None
-            parsed_remaining = None
-            for b in b_tags:
-                parts = [s.strip() for s in b.stripped_strings]
-                if not parts:
-                    continue
-                # first token often the number
-                num = None
-                if parts and re.match(r'^\d{1,4}$', parts[0]):
-                    num = int(parts[0])
-                label = ' '.join(parts[1:]).lower() if len(parts) > 1 else ''
-                if not label and b.find('span') is not None:
-                    label = (b.find('span').get_text(strip=True) or '').lower()
-                if num is not None and label:
-                    if 'max' in label or 'max spots' in label or 'maxim' in label or 'maxspelare' in label:
-                        parsed_limit = num
-                    if 'available' in label or 'available spots' in label or 'slots left' in label or 'available spots' in label or 'available' in label or 'lediga' in label or 'paikkoja' in label:
-                        parsed_remaining = num
-            if parsed_limit is not None or parsed_remaining is not None:
-                reg_val = None
-                lim_val = parsed_limit
-                rem_val = parsed_remaining
-                if lim_val is not None and rem_val is not None:
-                    reg_val = lim_val - rem_val
-                return {'registered': reg_val, 'limit': lim_val, 'remaining': rem_val, 'note': 'tjing-labelled-b'}
-        except Exception:
-            pass
-        m_spel = re.search(r"(\d{1,4})\s*(?:bekräftade|bekräftade spelare|spelare|deltagare)", page_text, re.I)
-        m_cap = re.search(r"(\d{1,4})\s*(?:max|maximalt|kapacitet|platser|maxspelare|maxPlayers|capacity)", page_text, re.I)
-        reg = int(m_spel.group(1)) if m_spel else None
-        lim = int(m_cap.group(1)) if m_cap else None
-        remaining = None
-        if reg is not None and lim is not None:
-            remaining = lim - reg
-            return {'registered': reg, 'limit': lim, 'remaining': remaining, 'note': 'tjing-direct-text'}
-        if reg is not None and lim is None:
-            return {'registered': reg, 'limit': None, 'remaining': None, 'note': 'tjing-registered'}
+        lbl = _parse_labelled_b_blocks(soup)
+        if lbl:
+            return lbl
+        # direct text patterns like 'confirmed players' and 'max'
+        slots = _extract_slots_text(page_text)
+        if slots:
+            return slots
 
         # fallback to earlier heuristics on page text
         reg2, lim2 = _extract_registered_and_limit(page_text)
@@ -513,17 +739,10 @@ def fetch_tjing_capacity(tjing_url: str, timeout=10):
                 rem = lim2
                 return {'registered': reg2, 'limit': lim2, 'remaining': rem, 'note': 'tjing-fallback'}
 
-        # Additional heuristics: look for explicit remaining/slots fields in JS/HTML
-        # JSON-like remaining fields
-        m_remaining_json = re.search(r'"remaining"\s*:\s*(\d{1,4})', text)
-        m_remaining_alt = re.search(r'"remainingSlots"\s*:\s*(\d{1,4})', text)
-        m_available = re.search(r'"available"\s*:\s*(\d{1,4})', text)
-        if m_remaining_json or m_remaining_alt or m_available:
-            try:
-                rem_val = int((m_remaining_json or m_remaining_alt or m_available).group(1))
-                return {'registered': None, 'limit': None, 'remaining': rem_val, 'note': 'tjing-remaining-json'}
-            except Exception:
-                pass
+        # explicit remaining fields in embedded JS/HTML
+        rem_js = _extract_remaining_jsonlike(text)
+        if rem_js:
+            return rem_js
 
         # Look for phrases like 'X slots left', Swedish/Finnish variants
         m_slots = re.search(r"(\d{1,4})\s*(?:available spots|slots left|places left|platser kvar|lediga platser|ledig plats|paikkoja jäljellä|paikkoja kvar|vapaita paikkoja)", page_text, re.I)
@@ -544,204 +763,10 @@ def fetch_tjing_capacity(tjing_url: str, timeout=10):
                 pass
 
         # If still nothing, try headless-rendered fallback using Playwright (if available)
-        if sync_playwright is not None:
-            try:
-                from_time = time.time()
-                with sync_playwright() as p:
-                    browser = p.chromium.launch(headless=True)
-                    page = browser.new_page()
-                    page.goto(tjing_url, timeout=timeout * 1000)
-                    # prefer window-initialized state if available
-                    state = None
-                    try:
-                        state = page.evaluate("() => (window.__INITIAL_STATE__ || window.__INITIAL_DATA__ || window.__INITIAL || null)")
-                    except Exception:
-                        state = None
-                    content = page.content()
-                    body_text = page.inner_text('body') if page.query_selector('body') else ''
-                    browser.close()
-
-                # If rendered body contains a registration start date in the future,
-                # don't return scraped numbers.
-                try:
-                    for pat in (r'Rekisteröityminen alkaa[:\s]*([0-3]?\d[.\-/][01]?\d[.\-/]\d{4}(?:\s+\d{1,2}:\d{2})?)',
-                                r'Registration starts[:\s]*([0-3]?\d[.\-/][01]?\d[.\-/]\d{4}(?:\s+\d{1,2}:\d{2})?)'):
-                        m = re.search(pat, body_text, re.I)
-                        if m:
-                            ds = m.group(1)
-                            try:
-                                parts = ds.split()
-                                dpart = parts[0]
-                                tpart = parts[1] if len(parts) > 1 else '00:00'
-                                sep = '.' if '.' in dpart else ('-' if '-' in dpart else '/')
-                                dfields = dpart.split(sep)
-                                day = int(dfields[0]); month = int(dfields[1]); year = int(dfields[2])
-                                hh, mm = (0, 0)
-                                if ':' in tpart:
-                                    hh, mm = [int(x) for x in tpart.split(':')[:2]]
-                                start_dt = datetime(year, month, day, hh, mm)
-                                if start_dt > datetime.now():
-                                    return {'registered': None, 'limit': None, 'remaining': None, 'note': 'registration-not-open', 'start': start_dt.isoformat()}
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-                # inspect state dict for known keys
-                if isinstance(state, dict):
-                    def deep_find(obj, keys):
-                        if isinstance(obj, dict):
-                            for k, v in obj.items():
-                                if k in keys and isinstance(v, int):
-                                    return v
-                                res = deep_find(v, keys)
-                                if res is not None:
-                                    return res
-                        elif isinstance(obj, list):
-                            for it in obj:
-                                res = deep_find(it, keys)
-                                if res is not None:
-                                    return res
-                        return None
-
-                    reg_s = deep_find(state, ('confirmed', 'confirmedPlayers', 'playersConfirmed', 'registered'))
-                    lim_s = deep_find(state, ('capacity', 'maxPlayers', 'max', 'slots', 'capacityLimit'))
-                    if reg_s is not None or lim_s is not None:
-                        rem = None
-                        if reg_s is not None and lim_s is not None:
-                            rem = int(lim_s) - int(reg_s)
-                        return {'registered': reg_s, 'limit': lim_s, 'remaining': rem, 'note': 'tjing-playwright-state'}
-
-                # Before the row heuristics, prefer an explicit phrase in the
-                # rendered Metrix DOM like "Maximum number of players: 36".
-                try:
-                    soup_try_phrase = BS(content or '', 'html.parser')
-                    whole_text = soup_try_phrase.get_text(" ", strip=True)
-                    phrase_patterns = (
-                        r'Maximum number of players[:\s]*([0-9]{1,3})',
-                        r'Maximum number of competitors[:\s]*([0-9]{1,3})',
-                        r'Max participants[:\s]*([0-9]{1,3})',
-                        r'Maksimi(?: osallistujamäärä| osallistujamäärä)[:\s]*([0-9]{1,3})',
-                        r'Maksimi(?: osallistujat| osallistujamäärä)[:\s]*([0-9]{1,3})',
-                        r'Suurin osallistujamäärä[:\s]*([0-9]{1,3})',
-                        r'Enintään[:\s]*([0-9]{1,3})\s*(?:pelaaj|pelaajaa|osallistuja)'
-                    )
-                    found_lim = None
-                    for pat in phrase_patterns:
-                        mlim = re.search(pat, whole_text, re.I)
-                        if mlim:
-                            try:
-                                val = int(mlim.group(1))
-                                if 0 <= val < 1000:
-                                    found_lim = val
-                                    break
-                            except Exception:
-                                continue
-
-                    if found_lim is not None:
-                        # try to find registered count nearby; default to 0
-                        reg_patterns = (r'Registered[:\s]*([0-9]{1,4})', r'Ilmoittautuneet[:\s]*([0-9]{1,4})', r'Registrations[:\s]*([0-9]{1,4})')
-                        found_reg = None
-                        for rpat in reg_patterns:
-                            mreg = re.search(rpat, whole_text, re.I)
-                            if mreg:
-                                try:
-                                    found_reg = int(mreg.group(1))
-                                    break
-                                except Exception:
-                                    pass
-                        if found_reg is None:
-                            found_reg = 0
-                        rem_calc = None
-                        try:
-                            rem_calc = int(found_lim) - int(found_reg)
-                        except Exception:
-                            rem_calc = None
-                        return {'registered': found_reg, 'limit': found_lim, 'remaining': rem_calc, 'note': 'metrix-direct-phrase'}
-                except Exception:
-                    pass
-
-                # First, try to parse the rendered DOM for explicit Metrix-style
-                # registration rows that use bold numbers like: <tr>...<b>3</b> <b>72</b> <b>0</b>
-                try:
-                    soup_r = BS(content or '', 'html.parser')
-                    # look for table rows that contain multiple <b> numeric values
-                    candidates = []
-                    for tr in soup_r.find_all('tr'):
-                        bnums = []
-                        for b in tr.find_all('b'):
-                            t = (b.get_text(strip=True) or '').strip()
-                            if re.match(r'^\d{1,4}$', t):
-                                try:
-                                    bnums.append(int(t))
-                                except Exception:
-                                    pass
-                        if len(bnums) >= 2:
-                            tr_text = tr.get_text(' ', strip=True).lower()
-                            candidates.append((tr_text, bnums))
-                    # prefer a candidate row that looks like a summary/total row
-                    preferred_keywords = ('total', 'yhteensä', 'yhteensa', 'rekister', 'ilmoittau', 'määrä', 'summa', 'totalen', 'totalt', 'max')
-                    for txt, bnums in candidates:
-                        # skip obvious year-like numbers (e.g., 2026) when considering limits
-                        if len(bnums) > 1 and (bnums[1] is None or bnums[1] >= 1000):
-                            continue
-                        if any(k in txt for k in preferred_keywords):
-                            reg_val = bnums[0]
-                            lim_val = bnums[1]
-                            rem_val = (lim_val - reg_val) if (lim_val is not None and reg_val is not None) else None
-                            return {'registered': reg_val, 'limit': lim_val, 'remaining': rem_val, 'note': 'metrix-playwright-row-summary'}
-                    # if no summary row found, pick the candidate whose second value (limit)
-                    # is largest or looks like a total (greater than first)
-                    if candidates:
-                        # filter out candidates with year-like second values
-                        sane = [c for c in candidates if len(c[1])>1 and c[1][1] < 1000]
-                        if sane:
-                            best = max(sane, key=lambda it: it[1][1])
-                            bnums = best[1]
-                            reg_val = bnums[0]
-                            lim_val = bnums[1]
-                            rem_val = (lim_val - reg_val) if (lim_val is not None and reg_val is not None) else None
-                            return {'registered': reg_val, 'limit': lim_val, 'remaining': rem_val, 'note': 'metrix-playwright-row-bestcandidate'}
-                    # also check for standalone labelled <b><span> patterns in rendered DOM
-                    parsed_limit = None
-                    parsed_remaining = None
-                    for b in soup_r.find_all('b'):
-                        parts = [s.strip() for s in b.stripped_strings]
-                        if not parts:
-                            continue
-                        num = None
-                        if parts and re.match(r'^\d{1,4}$', parts[0]):
-                            num = int(parts[0])
-                        label = ' '.join(parts[1:]).lower() if len(parts) > 1 else ''
-                        if not label and b.find('span') is not None:
-                            label = (b.find('span').get_text(strip=True) or '').lower()
-                        if num is not None and label:
-                            if 'max' in label or 'max spots' in label or 'maxim' in label or 'maxspelare' in label:
-                                parsed_limit = num
-                            if 'available' in label or 'available spots' in label or 'slots left' in label or 'lediga' in label or 'paikkoja' in label:
-                                parsed_remaining = num
-                    if parsed_limit is not None or parsed_remaining is not None:
-                        reg_val = None
-                        lim_val = parsed_limit
-                        rem_val = parsed_remaining
-                        if lim_val is not None and rem_val is not None:
-                            reg_val = lim_val - rem_val
-                        return {'registered': reg_val, 'limit': lim_val, 'remaining': rem_val, 'note': 'metrix-playwright-labelled-b'}
-                except Exception:
-                    pass
-
-                # fallback: run the same heuristics on the rendered body_text/content
-                reg3, lim3 = _extract_registered_and_limit(body_text or content)
-                if reg3 is not None or lim3 is not None:
-                    rem = None
-                    if reg3 is not None and lim3 is not None:
-                        rem = lim3 - reg3
-                    elif reg3 is None and lim3 is not None:
-                        rem = lim3
-                    # mark source: if the URL is Metrix, prefer metrix-playwright
-                    note_tag = 'metrix-playwright' if 'metrix' in (url or '').lower() else 'playwright-fallback'
-                    return _sanitize_capacity({'registered': reg3, 'limit': lim3, 'remaining': rem, 'note': note_tag})
-            except Exception as e:
-                logger.exception('Playwright TJing fallback failed: %s', e)
+        play_res = _playwright_tjing_fallback(tjing_url, timeout=timeout)
+        if play_res:
+            # If the playwright helper returned a dict, return it
+            return play_res
 
         return {'registered': None, 'limit': None, 'remaining': None, 'note': 'tjing-no-data'}
     except Exception as e:

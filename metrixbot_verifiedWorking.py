@@ -150,6 +150,102 @@ def post_embeds_to_discord(thread_id: str, token: str, embeds: list) -> bool:
         return False
 
 
+def post_startup_capacity_alerts(base_dir: str, token: str):
+    """On startup, check for capacity scan artifacts and post a short summary to Discord.
+    Looks for `CAPACITY_SCAN_RESULTS.json` and `CAPACITY_ALERTS.json` in `base_dir`.
+    """
+    if not token:
+        print('No DISCORD_TOKEN; skipping startup capacity alerts')
+        return
+    scan_path = os.path.join(base_dir, 'CAPACITY_SCAN_RESULTS.json')
+    alerts_path = os.path.join(base_dir, 'CAPACITY_ALERTS.json')
+
+    def _load_json(p):
+        try:
+            with open(p, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return None
+
+    scan = _load_json(scan_path)
+    alerts = _load_json(alerts_path)
+
+    # If neither file exists or both empty, nothing to do
+    if not scan and not alerts:
+        print('No capacity scan or alerts found at startup')
+        return
+
+    # Build a short message/embeds
+    embeds = []
+    if scan:
+        try:
+            total = len(scan) if isinstance(scan, list) else (len(scan.get('results', [])) if isinstance(scan, dict) else 0)
+        except Exception:
+            total = 0
+        embeds.append({
+            'title': 'Metrix: Kapasiteettiskannaus (startup)',
+            'description': f'Skannattuja kohteita: {total}',
+            'color': 3447003
+        })
+
+    if alerts:
+        try:
+            a_count = len(alerts) if isinstance(alerts, list) else (len(alerts.get('alerts', [])) if isinstance(alerts, dict) else 0)
+        except Exception:
+            a_count = 0
+        # Build a compact embed listing up to 8 alerts with key info
+        lines = []
+        if isinstance(alerts, list):
+            for it in alerts[:8]:
+                title = it.get('title') or it.get('name') or it.get('competition') or ''
+                rem = it.get('remaining')
+                reg = it.get('registered')
+                lim = it.get('limit')
+                url = it.get('url') or it.get('link') or ''
+                part = title
+                if rem is not None:
+                    part += f' — jäljellä: {rem}'
+                if reg is not None and lim is not None:
+                    part += f' ({reg}/{lim})'
+                if url:
+                    part = f'[{part}]({url})'
+                lines.append(part)
+        else:
+            lines.append(f'Ilmoituksia: {a_count}')
+
+        embeds.append({
+            'title': f'Kapasiteetti-ilmoituksia: {a_count}',
+            'description': '\n'.join(lines) or '(ei kohteita)',
+            'color': 15105570
+        })
+
+    # Post to configured thread (use CAPACITY_THREAD_ID, DISCORD_THREAD_ID or DISCORD_CHANNEL_ID)
+    target = os.environ.get('CAPACITY_THREAD_ID') or os.environ.get('DISCORD_THREAD_ID') or os.environ.get('DISCORD_CHANNEL_ID')
+    if not target:
+        print('No thread/channel configured for capacity alerts; skipping post')
+        return
+    print('Posting startup capacity summary to target:', target)
+    try:
+        posted = post_embeds_to_discord(target, token, embeds)
+        if posted:
+            print('Posted startup capacity summary to Discord')
+            return
+        # try fallback to main channel id if different
+        fallback = os.environ.get('DISCORD_CHANNEL_ID')
+        if fallback and fallback != target:
+            print('Initial post failed; trying fallback channel:', fallback)
+            try:
+                posted2 = post_embeds_to_discord(fallback, token, embeds)
+                if posted2:
+                    print('Posted startup capacity summary to fallback channel')
+                    return
+            except Exception as e:
+                print('Fallback post exception:', e)
+        print('Failed to post startup capacity summary; check target ID and bot permissions')
+    except Exception as e:
+        print('Exception posting startup capacity summary:', e)
+
+
 def run_once():
     _load_dotenv()
     # Import modules from hyvat_koodit
@@ -631,6 +727,31 @@ def start_registration_worker(base_dir, interval_seconds: int):
     return t
 
 
+def start_capacity_worker(base_dir, interval_seconds: int):
+    """Run capacity scan + alert generation periodically in background.
+    Calls `run_capacity_scan.main()` and `scripts.update_alerts_from_scan.main()`.
+    """
+    def worker():
+        while True:
+            try:
+                try:
+                    import run_capacity_scan as rcs
+                    rcs.main()
+                except Exception as e:
+                    print('Capacity scan failed:', e)
+                try:
+                    from scripts import update_alerts_from_scan as uas
+                    uas.main()
+                except Exception as e:
+                    print('Update alerts from scan failed:', e)
+            except Exception as e:
+                print('Capacity worker error:', e)
+            time.sleep(max(10, int(interval_seconds)))
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+    return t
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='metrixDiscordBot orchestrator')
@@ -641,6 +762,13 @@ def main():
                         help='Interval between runs when --daemon (minutes)')
     parser.add_argument('--times', type=int, default=1, help='When used with --once, run the orchestrator this many times in sequence')
     args = parser.parse_args()
+
+    # Run startup capacity check/posting if token configured
+    token = os.environ.get('DISCORD_TOKEN')
+    try:
+        post_startup_capacity_alerts(BASE_DIR, token)
+    except Exception as e:
+        print('Startup capacity alert check failed:', e)
 
     # If presence requested, start gateway client now (works for once/daemon modes)
     presence_thread = None
@@ -682,6 +810,13 @@ def main():
             print('Registration worker started (interval', CHECK_REGISTRATION_INTERVAL, 's)')
         except Exception as e:
             print('Failed to start registration worker:', e)
+        # start capacity scan worker thread
+        try:
+            cap_interval = int(os.environ.get('CAPACITY_CHECK_INTERVAL', str(CHECK_INTERVAL)))
+            start_capacity_worker(BASE_DIR, cap_interval)
+            print('Capacity worker started (interval', cap_interval, 's)')
+        except Exception as e:
+            print('Failed to start capacity worker:', e)
         while True:
             try:
                 run_once()

@@ -77,7 +77,7 @@ def start_presence(token: Optional[str], status_message: Optional[str] = None, r
             token = token[1:-1]
 
     if not token:
-        print('No token provided for presence; skipping')
+        print('Ei tokenia, läsnäolo ohitetaan')
         return None
     pt = PresenceThread(token, status_message=status_message, run_forever=run_forever)
     pt.start()

@@ -165,21 +165,21 @@ if __name__ == '__main__':
                         c.setdefault('kind', 'VIIKKOKISA')
                     comps.append(c)
         except FileNotFoundError:
-            print(f'{label} file not found at {path}; skipping')
+            print(f'{label} -tiedostoa ei löytynyt kohdasta {path}; ohitetaan')
         except Exception as e:
-            print(f'Failed to read {label} list:', e)
+            print(f'Virhe luettaessa {label}-listaa:', e)
 
     results = []
     for c in comps:
         r = check_competition(c)
         results.append(r)
-        print(f"{r.get('id')} | {r.get('name')} | {r.get('kind')} -> registration_open={r.get('registration_open')} ({r.get('note')})")
+        print(f"{r.get('id')} | {r.get('name')} | {r.get('kind')} -> ilmoittautuminen_avoinna={r.get('registration_open')} ({r.get('note')})")
 
     # filter only open
     open_comps = [r for r in results if r.get('registration_open')]
     try:
         with open(OUT_PATH, 'w', encoding='utf-8') as f:
             json.dump(open_comps, f, ensure_ascii=False, indent=2)
-        print(f'Saved {len(open_comps)} open registrations to', OUT_PATH)
+        print(f'Tallennettu {len(open_comps)} avoinna olevaa rekisteröintiä tiedostoon', OUT_PATH)
     except Exception as e:
-        print('Failed to save pending_registration.json:', e)
+        print('Tallennus epäonnistui tiedostoon pending_registration.json:', e)

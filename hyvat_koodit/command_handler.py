@@ -48,7 +48,7 @@ class CommandListenerThread(threading.Thread):
 
         @client.event
         async def on_ready():
-            print(f'Command listener connected as {client.user}')
+            print(f'Komentokuuntelija yhdistetty käyttäjänä {client.user}')
             if not self.run_forever:
                 await client.close()
 
@@ -413,7 +413,7 @@ class CommandListenerThread(threading.Thread):
                                         provided_res = json.load(f)
                                     minutes = int(age // 60)
                                     try:
-                                        await channel.send(f'Using cached alerts (updated {minutes} minutes ago).')
+                                        await channel.send(f'Käytetään välimuistissa olevia ilmoituksia (päivitetty {minutes} minuuttia sitten).')
                                     except Exception:
                                         pass
                                 except Exception:
@@ -438,21 +438,11 @@ class CommandListenerThread(threading.Thread):
                             rem = c.get('remaining')
                             # prefer computing remaining from reg/lim when possible
                             if reg is not None and lim is not None:
-                                try:
-                                    calc_rem = int(lim) - int(reg)
-                                except Exception:
-                                    calc_rem = rem
-                                if calc_rem is None:
-                                    rem_txt = '?'
-                                elif calc_rem >= 0:
-                                    rem_txt = f'{calc_rem} left'
-                                else:
-                                    rem_txt = f'over by {abs(int(calc_rem))}'
-                                disp = f'{reg}/{lim} ({rem_txt})'
+                                disp = f'{reg}/{lim}'
                             elif reg is not None and lim is None:
                                 disp = f'{reg}/?'
                             elif reg is None and lim is not None:
-                                disp = f'?/{lim} ({rem if rem is not None else "?"} left)'
+                                disp = f'?/{lim}'
                             else:
                                 disp = f'järjellä {rem if rem is not None else "?"} paikkaa'
 
@@ -493,12 +483,15 @@ class CommandListenerThread(threading.Thread):
                         return
 
                     # Otherwise perform the background capacity check as before
-                    await channel.send('Checking spot availability (this runs in background)...')
+                    await channel.send('Tarkistan paikkojen tilannetta (suoritetaan taustalla)...')
 
                     loop = asyncio.get_running_loop()
 
                     def run_check():
                         try:
+                            if capacity_mod is None or not hasattr(capacity_mod, 'find_low_capacity'):
+                                logger.warning('Capacity module not available; skipping live check')
+                                return []
                             return capacity_mod.find_low_capacity()
                         except Exception as e:
                             logger.exception('Error in capacity check: %s', e)
@@ -509,10 +502,10 @@ class CommandListenerThread(threading.Thread):
                     async def handle_result(fut):
                         res = await fut
                         if isinstance(res, Exception):
-                            await channel.send(f'Error checking spots: {res}')
+                            await channel.send(f'Virhe paikkojen tarkistuksessa: {res}')
                             return
                         if not res:
-                            await channel.send('No low-capacity events found.')
+                            await channel.send('Ei kilpailuja, joissa vähän paikkoja.')
                             return
 
                         # Build lines and chunk into Discord-safe messages (<= ~2000 chars)
@@ -524,21 +517,11 @@ class CommandListenerThread(threading.Thread):
                             lim = c.get('limit')
                             rem = c.get('remaining')
                             if reg is not None and lim is not None:
-                                try:
-                                    calc_rem = int(lim) - int(reg)
-                                except Exception:
-                                    calc_rem = rem
-                                if calc_rem is None:
-                                    rem_txt = '?'
-                                elif calc_rem >= 0:
-                                    rem_txt = f'{calc_rem} left'
-                                else:
-                                    rem_txt = f'over by {abs(int(calc_rem))}'
-                                disp = f'{reg}/{lim} ({rem_txt})'
+                                disp = f'{reg}/{lim}'
                             elif reg is not None and lim is None:
                                 disp = f'{reg}/?'
                             elif reg is None and lim is not None:
-                                disp = f'?/{lim} ({rem if rem is not None else "?"} left)'
+                                disp = f'?/{lim}'
                             else:
                                 disp = f'järjellä {rem if rem is not None else "?"} paikkaa'
                             lines.append(f'• {name} — {disp} — {url}')
