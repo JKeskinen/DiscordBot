@@ -1,0 +1,50 @@
+[
+  {
+    "id": "3500547",
+    "title": "SFL MASTERS TOUR VIISARI BY RIEPPO SERVICE OY",
+    "url": "https://discgolfmetrix.com/3500547",
+    "registered": null,
+    "limit": null,
+    "remaining": null,
+    "note": "metrix-tjing-mention no-visible-limit",
+    "no_visible_limit": true
+  },
+  {
+    "id": "3512042",
+    "title": "NBDG Winter Tour™ Powered by Valostore → #6 Iitti",
+    "url": "https://discgolfmetrix.com/3512042",
+    "registered": 64,
+    "limit": 72,
+    "remaining": 8,
+    "note": "metrix-playwright-phrase"
+  },
+  {
+    "id": "3512043",
+    "title": "NBDG Winter Tour™ Powered by Valostore → #7 Puolarmaari",
+    "url": "https://discgolfmetrix.com/3512043",
+    "registered": 75,
+    "limit": 80,
+    "remaining": 5,
+    "note": "metrix-playwright-phrase"
+  },
+  {
+    "id": "3523248",
+    "title": "FGK viikkarit 2026 → vko 1 - Uimahallinpuisto",
+    "url": "https://discgolfmetrix.com/3523248",
+    "registered": 1,
+    "limit": null,
+    "remaining": null,
+    "note": "metrix-playwright no-visible-limit",
+    "no_visible_limit": true
+  },
+  {
+    "id": "3426381",
+    "title": "Luoma-ahon Lauantai Liiga",
+    "url": "https://discgolfmetrix.com/3426381",
+    "registered": 6,
+    "limit": null,
+    "remaining": null,
+    "note": "metrix-playwright no-visible-limit",
+    "no_visible_limit": true
+  }
+]

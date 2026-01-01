@@ -4,4 +4,4 @@ python-dotenv
 # optional for full Discord bot runtime
 discord.py==2.3.2
 # optional: playwright if you plan to use Playwright fallback
-# playwright
+playwright

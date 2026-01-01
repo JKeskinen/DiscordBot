@@ -1,4 +1,5 @@
 import requests
+import logging
 from bs4 import BeautifulSoup as BS
 import re
 import urllib.parse
@@ -19,11 +20,12 @@ area_enc = urllib.parse.quote(AREA)
 type_part = f"&type={TYPE}" if TYPE else ""
 url = f"https://discgolfmetrix.com/competitions_server.php?name=&date1={DATE1}&date2={DATE2}&registration_date1=&registration_date2=&country_code={COUNTRY}{type_part}&from=1&to=200&page=all&area={area_enc}"
 
-print('URL:', url)
+logger = logging.getLogger(__name__)
+logger.info('URL: %s', url)
 start = time.perf_counter()
 resp = requests.get(url, timeout=20, headers={'User-Agent':'Mozilla/5.0'})
 elapsed = time.perf_counter() - start
-print(f"HTTP fetch time: {elapsed:.2f}s, status: {resp.status_code}")
+logger.info("HTTP fetch time: %.2fs, status: %s", elapsed, resp.status_code)
 resp.encoding = resp.apparent_encoding
 soup = BS(resp.text, 'html.parser')
 container = soup.find(id='competition_list2')
@@ -121,25 +123,25 @@ if AREA and unique:
             # Default any unclassified area result to weekly
             r['kind'] = 'VIIKKOKISA'
 
-print(f"Parsed {len(unique)} entries (gridlist/table) in {AREA}")
+logger.info("Parsed %d entries (gridlist/table) in %s", len(unique), AREA)
 # show counts by kind
 from collections import Counter
 kcounts = Counter([r.get('kind') or 'OTHER' for r in unique])
-print('Counts by kind:', dict(kcounts))
+logger.info('Counts by kind: %s', dict(kcounts))
 
 # Report how many were defaulted to VIIKKOKISA and save them
 wk_count = sum(1 for r in unique if r.get('kind') == 'VIIKKOKISA')
-print(f"VIIKKOKISA after defaulting: {wk_count}")
+logger.info("VIIKKOKISA after defaulting: %d", wk_count)
 try:
     # Persist using centralized data_store (keeps filename VIIKKOKISA.json by default)
     entries = [r for r in unique if r.get('kind') == 'VIIKKOKISA']
     data_store.save_category('VIIKKOKISA', entries)
 except Exception as e:
-    print(f"Failed to save VIIKKOKISA.json: {e}")
+    logger.exception('Failed to save VIIKKOKISA.json: %s', e)
 
 WEEKLY_VERBOSE = os.environ.get('WEEKLY_VERBOSE', '0') == '1'
 if WEEKLY_VERBOSE:
     for r in unique:
-        print(f"- {r.get('id')} | {r.get('title')} | {r.get('kind')} | {r.get('location')} | {r.get('date')}")
+        logger.info("- %s | %s | %s | %s | %s", r.get('id'), r.get('title'), r.get('kind'), r.get('location'), r.get('date'))
 
-print('\nDone.')
+logger.info('Done.')

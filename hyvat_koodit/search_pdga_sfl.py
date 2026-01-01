@@ -1,4 +1,5 @@
 import requests
+import logging
 from bs4 import BeautifulSoup as BS
 import re
 import urllib.parse
@@ -19,14 +20,15 @@ DEFAULT_URL = (
 
 def fetch_competitions(url: str):
     headers = {"User-Agent": "Mozilla/5.0 (pdga-finder)"}
+    logger = logging.getLogger(__name__)
     try:
         start = time.perf_counter()
         r = requests.get(url, timeout=20, headers=headers)
         r.raise_for_status()
         elapsed = time.perf_counter() - start
-        print(f"Fetched {url} in {elapsed:.2f}s, status={r.status_code}")
+        logger.info("Fetched %s in %.2fs, status=%s", url, elapsed, r.status_code)
     except Exception as e:
-        print(f"Fetch failed: {e}")
+        logger.exception("Fetch failed: %s", e)
         return []
 
     r.encoding = r.apparent_encoding
@@ -81,7 +83,7 @@ def fetch_competitions(url: str):
     # If nothing found on the page, try the fast server endpoint as a fallback
     if not unique:
         try:
-            print("No entries found on page; trying competitions_server.php fallback...")
+            logger.info("No entries found on page; trying competitions_server.php fallback...")
             # derive date1/date2 and clubid from provided URL if present
             from urllib.parse import urlparse, parse_qs, urlencode
             parsed = urlparse(url)
@@ -98,7 +100,7 @@ def fetch_competitions(url: str):
             r2 = requests.get(server_url, timeout=20, headers={"User-Agent": "Mozilla/5.0 (pdga-finder)"})
             r2.raise_for_status()
             elapsed = time.perf_counter() - start
-            print(f"Server endpoint fetch time: {elapsed:.2f}s, status={r2.status_code}")
+            logger.info("Server endpoint fetch time: %.2fs, status=%s", elapsed, r2.status_code)
             r2.encoding = r2.apparent_encoding
             soup2 = BS(r2.text, 'html.parser')
             cont2 = soup2.find(id='competition_list2') or soup2
@@ -139,10 +141,10 @@ def fetch_competitions(url: str):
                     continue
                 seen2.add(cid)
                 unique2.append(r)
-            print(f"Server endpoint returned {len(unique2)} entries")
+            logger.info("Server endpoint returned %d entries", len(unique2))
             return unique2
         except Exception as e:
-            print(f"Server endpoint fallback failed: {e}")
+            logger.exception("Server endpoint fallback failed: %s", e)
     return unique
 
 
@@ -196,10 +198,11 @@ def main():
     out = args.out or os.path.join(base_dir, "PDGA.json")
 
     comps = fetch_competitions(args.url)
-    print(f"Parsed {len(comps)} competitions from SFL page")
+    logger = logging.getLogger(__name__)
+    logger.info("Parsed %d competitions from SFL page", len(comps))
 
     pdga = [c for c in comps if is_pdga_entry(c)]
-    print(f"Detected {len(pdga)} PDGA competitions (heuristic)")
+    logger.info("Detected %d PDGA competitions (heuristic)", len(pdga))
 
     save_pdga_list(pdga, out)
 
