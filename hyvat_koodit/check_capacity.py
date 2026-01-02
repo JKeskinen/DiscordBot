@@ -238,26 +238,29 @@ def _check_registration_start_in_future(text: str):
 def _extract_json_confirmed_capacity(text: str):
     try:
         m_confirmed = re.search(r'"confirmed"\s*:\s*(\d{1,4})', text)
-        if not m_confirmed:
+        if m_confirmed is None:
             return None
         m_capacity = re.search(r'"capacity"\s*:\s*(\d{1,4})', text)
         m_max = re.search(r'"maxPlayers"\s*:\s*(\d{1,4})', text)
-        if not (m_capacity or m_max):
+        if m_capacity is None and m_max is None:
             return None
         try:
             reg = int(m_confirmed.group(1))
         except Exception:
             return None
-        if m_capacity:
+        lim = None
+        if m_capacity is not None:
             try:
                 lim = int(m_capacity.group(1))
             except Exception:
                 return None
-        else:
+        elif m_max is not None:
             try:
                 lim = int(m_max.group(1))
             except Exception:
                 return None
+        if lim is None:
+            return None
         return {'registered': reg, 'limit': lim, 'remaining': lim - reg, 'note': 'tjing-direct-json'}
     except Exception:
         pass

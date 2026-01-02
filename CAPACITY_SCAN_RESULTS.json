@@ -4,11 +4,11 @@
     "name": "SFL MASTERS TOUR VIISARI BY RIEPPO SERVICE OY",
     "url": "https://discgolfmetrix.com/3500547",
     "capacity_result": {
-      "registered": null,
-      "limit": null,
-      "remaining": null,
-      "note": "metrix-tjing-mention no-visible-limit",
-      "metrix_header_empty": true
+      "registered": 42,
+      "limit": 72,
+      "remaining": 30,
+      "note": "metrix-playwright-phrase",
+      "metrix_header_empty": false
     }
   },
   {
@@ -16,11 +16,11 @@
     "name": "NBDG Winter Tour™ Powered by Valostore → #4 Kukonkoivu",
     "url": "https://discgolfmetrix.com/3509787",
     "capacity_result": {
-      "registered": 86,
+      "registered": 85,
       "limit": 76,
       "remaining": 0,
       "note": "metrix-playwright-phrase-waitlist",
-      "queued": 10,
+      "queued": 9,
       "metrix_header_empty": false
     }
   },
@@ -41,11 +41,23 @@
     "name": "NBDG Winter Tour™ Powered by Valostore → #5 Ford DGP",
     "url": "https://discgolfmetrix.com/3509798",
     "capacity_result": {
-      "registered": 77,
+      "registered": 76,
       "limit": 72,
       "remaining": 0,
       "note": "metrix-playwright-phrase-waitlist",
-      "queued": 5,
+      "queued": 4,
+      "metrix_header_empty": false
+    }
+  },
+  {
+    "id": "3516795",
+    "name": "Kirkkonummen talvi By Fribakisat.fi",
+    "url": "https://discgolfmetrix.com/3516795",
+    "capacity_result": {
+      "registered": 3,
+      "limit": 72,
+      "remaining": 69,
+      "note": "metrix-playwright-phrase",
       "metrix_header_empty": false
     }
   },
@@ -54,9 +66,9 @@
     "name": "NBDG Extra™ Petäjäsuo",
     "url": "https://discgolfmetrix.com/3511868",
     "capacity_result": {
-      "registered": 12,
+      "registered": 13,
       "limit": 72,
-      "remaining": 60,
+      "remaining": 59,
       "note": "metrix-playwright-phrase",
       "metrix_header_empty": false
     }
@@ -102,9 +114,9 @@
     "name": "NBDG Amateurs™ Lemmenlaakso",
     "url": "https://discgolfmetrix.com/3515259",
     "capacity_result": {
-      "registered": 38,
+      "registered": 39,
       "limit": 72,
-      "remaining": 34,
+      "remaining": 33,
       "note": "metrix-playwright-phrase",
       "metrix_header_empty": false
     }
@@ -126,9 +138,9 @@
     "name": "NBDG Winter Tour™ Powered by Valostore → #7 Puolarmaari",
     "url": "https://discgolfmetrix.com/3512043",
     "capacity_result": {
-      "registered": 75,
+      "registered": 76,
       "limit": 80,
-      "remaining": 5,
+      "remaining": 4,
       "note": "metrix-playwright-phrase",
       "metrix_header_empty": false
     }
@@ -150,9 +162,9 @@
     "name": "Luolavuoren Talvi",
     "url": "https://discgolfmetrix.com/3520307",
     "capacity_result": {
-      "registered": 13,
+      "registered": 15,
       "limit": 72,
-      "remaining": 59,
+      "remaining": 57,
       "note": "metrix-playwright-phrase",
       "metrix_header_empty": false
     }
@@ -174,9 +186,9 @@
     "name": "NBDG Winter Tour™ Powered by Valostore → #8 Orimattila",
     "url": "https://discgolfmetrix.com/3512046",
     "capacity_result": {
-      "registered": 0,
+      "registered": 24,
       "limit": 84,
-      "remaining": 84,
+      "remaining": 60,
       "note": "metrix-playwright-phrase",
       "metrix_header_empty": false
     }
@@ -234,9 +246,9 @@
     "name": "Skogby kevätrieha 2026",
     "url": "https://discgolfmetrix.com/3516653",
     "capacity_result": {
-      "registered": 3,
+      "registered": 18,
       "limit": 100,
-      "remaining": 97,
+      "remaining": 82,
       "note": "metrix-playwright-phrase",
       "metrix_header_empty": false
     }
@@ -247,10 +259,10 @@
     "url": "https://discgolfmetrix.com/3523248",
     "capacity_result": {
       "registered": 1,
-      "limit": null,
-      "remaining": null,
-      "note": "metrix-playwright no-visible-limit",
-      "metrix_header_empty": true
+      "limit": 3,
+      "remaining": 2,
+      "note": "metrix-playwright",
+      "metrix_header_empty": false
     }
   },
   {

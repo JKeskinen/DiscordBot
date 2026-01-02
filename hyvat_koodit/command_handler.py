@@ -6,6 +6,13 @@ import re
 import asyncio
 import concurrent.futures
 import logging
+import requests
+import csv
+
+try:
+    from bs4 import BeautifulSoup  # type: ignore[import]
+except Exception:
+    BeautifulSoup = None
 
 try:
     import discord  # type: ignore[import]
@@ -17,6 +24,129 @@ try:
 except Exception:
     capacity_mod = None
 from typing import Any, cast
+
+
+PDGA_DISC_URL = "https://www.pdga.com/technical-standards/equipment-certification/all"
+PDGA_DISCS_CSV_URL = "https://www.pdga.com/technical-standards/equipment-certification/discs/export"
+
+
+def _search_pdga_disc(name: str):
+    """Search PDGA lists for a disc name.
+
+    Prefers the discs CSV export (with technical specs). Falls back to the
+    older HTML equipment list if CSV fetch fails. Returns a list of dicts with
+    keys like: manufacturer, product/model, cert_type/class, date, and various
+    spec fields (max_weight_g, diameter_cm, height_cm, rim_depth_cm,
+    rim_thickness_cm, inside_rim_diameter_cm, rim_depth_diameter_ratio_pct,
+    flexibility_kg, disc_class, cert_number, approved_date, etc.).
+    """
+    name = (name or "").strip()
+    if not name:
+        return []
+
+    q = name.lower()
+
+    # First try the CSV export which contains all technical specifications.
+    try:
+        resp_csv = requests.get(PDGA_DISCS_CSV_URL, timeout=20)
+        if getattr(resp_csv, "status_code", 0) == 200 and resp_csv.text:
+            text = resp_csv.text
+            rows = list(csv.DictReader(text.splitlines()))
+            exact = []
+            partial = []
+            for row in rows:
+                model = (row.get("Disc Model") or "").strip()
+                manu = (row.get("Manufacturer / Distributor") or "").strip()
+                if not model:
+                    continue
+                rec = {
+                    "manufacturer": manu,
+                    "product": model,
+                    "model": model,
+                    "cert_type": (row.get("Class") or "").strip(),
+                    "disc_class": (row.get("Class") or "").strip(),
+                    "date": (row.get("Approved Date") or "").strip(),
+                    "approved_date": (row.get("Approved Date") or "").strip(),
+                    "max_weight_g": (row.get("Max Weight (gr)") or "").strip(),
+                    "diameter_cm": (row.get("Diameter (cm)") or "").strip(),
+                    "height_cm": (row.get("Height (cm)") or "").strip(),
+                    "rim_depth_cm": (row.get("Rim Depth (cm)") or "").strip(),
+                    "inside_rim_diameter_cm": (row.get("Inside Rim Diameter (cm)") or "").strip(),
+                    "rim_thickness_cm": (row.get("Rim Thickness (cm)") or "").strip(),
+                    "rim_depth_diameter_ratio_pct": (row.get("Rim Depth / Diameter Ratio (%)") or "").strip(),
+                    "rim_configuration": (row.get("Rim Configuration") or "").strip(),
+                    "flexibility_kg": (row.get("Flexibility (kg)") or "").strip(),
+                    "max_weight_vint_g": (row.get("Max Weight Vint (gr)") or "").strip(),
+                    "last_year_production": (row.get("Last Year Production") or "").strip(),
+                    "cert_number": (row.get("Certification Number") or "").strip(),
+                }
+                lm = model.lower()
+                if lm == q:
+                    exact.append(rec)
+                elif q in lm:
+                    partial.append(rec)
+            if exact or partial:
+                return exact or partial
+    except Exception:
+        # If CSV fetch fails, fall back to HTML scraping below.
+        pass
+
+    # Legacy fallback: HTML equipment list search
+    try:
+        resp = requests.get(PDGA_DISC_URL, params={"title": name}, timeout=10)
+    except Exception:
+        return []
+
+    if getattr(resp, "status_code", 0) != 200:
+        return []
+
+    html = resp.text or ""
+
+    # Prefer BeautifulSoup when available for robust parsing
+    if BeautifulSoup is not None:
+        try:
+            soup = BeautifulSoup(html, "html.parser")
+            table = soup.find("table", class_="views-table") or soup.find("table")
+            if not table:
+                return []
+            results = []
+            for tr in table.find_all("tr"):
+                tds = tr.find_all("td")
+                if len(tds) < 4:
+                    continue
+                manufacturer = tds[0].get_text(strip=True)
+                product = tds[1].get_text(strip=True)
+                cert_type = tds[2].get_text(strip=True)
+                date = tds[3].get_text(strip=True)
+                if not manufacturer and not product:
+                    continue
+                results.append({
+                    "manufacturer": manufacturer,
+                    "product": product,
+                    "cert_type": cert_type,
+                    "date": date,
+                })
+            return results
+        except Exception:
+            pass
+
+    # Fallback: very naive parsing from plain text
+    results = []
+    lowered = html.lower()
+    if name.lower() not in lowered:
+        return []
+    for line in html.splitlines():
+        if name.lower() in line.lower() and "Disc Certification" in line:
+            parts = [p.strip() for p in line.split("|") if p.strip()]
+            if len(parts) >= 4:
+                manufacturer, product, cert_type, date = parts[0], parts[1], parts[2], parts[3]
+                results.append({
+                    "manufacturer": manufacturer,
+                    "product": product,
+                    "cert_type": cert_type,
+                    "date": date,
+                })
+    return results
 
 
 class CommandListenerThread(threading.Thread):
@@ -329,6 +459,102 @@ class CommandListenerThread(threading.Thread):
                             await message.channel.send('\n'.join(cur))
                     return
 
+                # --- !kiekko: search PDGA disc approvals ---
+                if command == 'kiekko':
+                    query = ' '.join(parts[1:]).strip()
+                    if not query:
+                        try:
+                            await message.channel.send('K\u00e4ytt\u00f6: !kiekko <kiekon nimi> \u2014 esim: !kiekko destroyer')
+                        except Exception:
+                            pass
+                        return
+
+                    try:
+                        if hasattr(message.channel, 'trigger_typing'):
+                            await message.channel.trigger_typing()
+                    except Exception:
+                        pass
+
+                    loop = asyncio.get_running_loop()
+
+                    def _do_search():
+                        return _search_pdga_disc(query)
+
+                    res = await loop.run_in_executor(None, _do_search)
+
+                    if not res:
+                        try:
+                            await message.channel.send(f'Kiekkoa ei l\u00f6ytynyt haulla: {query}')
+                        except Exception:
+                            pass
+                        return
+
+                    # Use the best match (first in list) and format detailed specs
+                    best = res[0]
+                    model = (best.get('model') or best.get('product') or '').strip() or query
+                    manu = (best.get('manufacturer') or '').strip()
+                    approved = (best.get('approved_date') or best.get('date') or '').strip()
+
+                    max_weight = (best.get('max_weight_g') or '').strip()
+                    diameter = (best.get('diameter_cm') or '').strip()
+                    height = (best.get('height_cm') or '').strip()
+                    rim_depth = (best.get('rim_depth_cm') or '').strip()
+                    rim_thickness = (best.get('rim_thickness_cm') or '').strip()
+                    inside_rim = (best.get('inside_rim_diameter_cm') or '').strip()
+                    ratio = (best.get('rim_depth_diameter_ratio_pct') or '').strip()
+                    disc_class = (best.get('disc_class') or best.get('cert_type') or '').strip()
+                    flex = (best.get('flexibility_kg') or '').strip()
+                    cert_no = (best.get('cert_number') or '').strip()
+                    last_year = (best.get('last_year_production') or '').strip()
+
+                    lines = []
+                    lines.append(model)
+                    if manu:
+                        lines.append(f'Valmistaja: {manu}')
+                    if approved:
+                        lines.append(f'Hyv\u00e4ksytty: {approved}')
+                    if max_weight:
+                        lines.append(f'Paino: {max_weight} g')
+                    if diameter:
+                        lines.append(f'Halkaisija: {diameter} cm')
+                    if height:
+                        lines.append(f'Korkeus: {height} cm')
+                    if rim_depth:
+                        lines.append(f'Rimmin syvyys: {rim_depth} cm')
+                    if rim_thickness:
+                        lines.append(f'Rimmin leveys: {rim_thickness} cm')
+                    if inside_rim:
+                        lines.append(f'Rimmin sis\u00e4halkaisija: {inside_rim} cm')
+                    if ratio:
+                        lines.append(f'Rimmin syvyys/halkaisija: {ratio} %')
+                    if disc_class:
+                        lines.append(f'Luokka: {disc_class}')
+                    if flex:
+                        lines.append(f'Joustavuus: {flex} kg')
+                    if cert_no:
+                        lines.append(f'Sertifikaatti: {cert_no}')
+                    if last_year:
+                        lines.append(f'Viimeinen tuotantovuosi: {last_year}')
+
+                    desc = '\n'.join(lines)
+
+                    try:
+                        Embed_cls = getattr(discord, 'Embed', None)
+                        if Embed_cls:
+                            title = 'L\u00f6ytyi kiekkoja:'
+                            embed = Embed_cls(title=title, description=desc)
+                            # Simple generic PDGA discs link as source
+                            embed.add_field(name='PDGA', value='[Hyv\u00e4ksytyt kiekot](https://www.pdga.com/technical-standards/equipment-certification/discs)', inline=False)
+                            await message.channel.send(embed=embed)
+                        else:
+                            await message.channel.send(f'L\u00f6ytyi kiekkoja:\n{desc}')
+                    except Exception:
+                        try:
+                            await message.channel.send(f'L\u00f6ytyi kiekkoja:\n{desc}')
+                        except Exception:
+                            pass
+                    return
+
                 # --- !help: competition-related commands ---
                 if command == 'help':
                     try:
@@ -338,7 +564,8 @@ class CommandListenerThread(threading.Thread):
                             '\n'
                             '!rek — näytä avoimet rekisteröinnit (PDGA / viikon kilpailut)\n'
                             '!etsi <hakusana> — etsi kilpailuja nimen/alueen/radan perusteella\n'
-                            '!spots — tarkista kilpailujen jäljellä olevat paikat (alle 20 ilmoittaa)'
+                            '!spots — tarkista kilpailujen jäljellä olevat paikat (alle 20 ilmoittaa)\n'
+                            '!kiekko <nimi> — hae PDGA:n kiekko-/varustelistalta (esim. "destroyer")'
                         )
                         Embed_cls = getattr(discord, 'Embed', None)
                         if Embed_cls:

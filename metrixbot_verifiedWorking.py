@@ -5,6 +5,8 @@ import threading
 import requests
 import logging
 import re
+import csv
+from typing import Optional
 
 # Module base dir
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -34,6 +36,7 @@ DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
 DISCORD_CHANNEL_ID = int(os.environ.get("DISCORD_CHANNEL_ID", "1241453177979797584"))
 DISCORD_THREAD_ID = int(os.environ.get("DISCORD_THREAD_ID", "1241493648080764988"))
 DISCORD_WEEKLY_THREAD_ID = int(os.environ.get("DISCORD_WEEKLY_THREAD_ID", "1455647584583417889"))
+DISCORD_DISCS_THREAD_ID = os.environ.get("DISCORD_DISCS_THREAD", "1241464044783669388")
 
 WEEKLY_JSON = os.environ.get("WEEKLY_JSON", "weekly_pair.json")
 WEEKLY_LOCATION = os.environ.get("WEEKLY_LOCATION", "Etelä-Pohjanmaa").strip().lower()
@@ -50,6 +53,7 @@ CACHE_FILE = os.environ.get('CACHE_FILE', 'known_pdga_competitions.json')
 REG_CHECK_FILE = os.environ.get('REG_CHECK_FILE', 'pending_registration.json')
 KNOWN_WEEKLY_FILE = os.environ.get('KNOWN_WEEKLY_FILE', 'known_weekly_competitions.json')
 KNOWN_DOUBLES_FILE = os.environ.get('KNOWN_DOUBLES_FILE', 'known_doubles_competitions.json')
+KNOWN_PDGA_DISCS_FILE = os.environ.get('KNOWN_PDGA_DISCS_FILE', 'known_pdga_discs_specs.json')
 
 # -------------------------
 # Discord message formatting options
@@ -150,7 +154,7 @@ def post_embeds_to_discord(thread_id: str, token: str, embeds: list) -> bool:
         return False
 
 
-def post_startup_capacity_alerts(base_dir: str, token: str):
+def post_startup_capacity_alerts(base_dir: str, token: Optional[str]):
     """On startup, check for capacity scan artifacts and post a short summary to Discord.
     Looks for `CAPACITY_SCAN_RESULTS.json` and `CAPACITY_ALERTS.json` in `base_dir`.
     """
@@ -752,6 +756,150 @@ def start_capacity_worker(base_dir, interval_seconds: int):
     return t
 
 
+def _check_new_pdga_discs_once(base_dir):
+    """Check PDGA discs CSV export for newly approved discs and post to Discord.
+
+    Uses a local JSON file (KNOWN_PDGA_DISCS_FILE) to remember which
+    certification numbers/models have already been seen. On the very first run
+    (no known file), it will initialise the file but will NOT post anything to
+    avoid spamming historical discs.
+    """
+    url = 'https://www.pdga.com/technical-standards/equipment-certification/discs/export'
+    token = os.environ.get('DISCORD_TOKEN')
+    if not token:
+        print('No DISCORD_TOKEN; skipping PDGA discs check')
+        return
+
+    known_path = os.path.join(base_dir, KNOWN_PDGA_DISCS_FILE)
+    first_run = False
+    try:
+        with open(known_path, 'r', encoding='utf-8') as f:
+            known_list = json.load(f) or []
+    except FileNotFoundError:
+        known_list = []
+        first_run = True
+    except Exception:
+        known_list = []
+
+    known_keys = set(str(k) for k in known_list)
+
+    try:
+        resp = requests.get(url, timeout=30)
+    except Exception as e:
+        print('Failed to fetch PDGA discs CSV:', e)
+        return
+
+    if resp.status_code != 200 or not resp.text:
+        print('PDGA discs CSV fetch returned status', resp.status_code)
+        return
+
+    text = resp.text
+    try:
+        rows = list(csv.DictReader(text.splitlines()))
+    except Exception as e:
+        print('Failed to parse PDGA discs CSV:', e)
+        return
+
+    all_keys = []
+    new_rows = []
+    for row in rows:
+        manu = (row.get('Manufacturer / Distributor') or '').strip()
+        model = (row.get('Disc Model') or '').strip()
+        cert = (row.get('Certification Number') or '').strip()
+        if not manu and not model and not cert:
+            continue
+        key = cert or f"{manu}|{model}"
+        all_keys.append(key)
+        if key not in known_keys:
+            new_rows.append(row)
+
+    # First run: initialise known file but do not post
+    if first_run:
+        try:
+            with open(known_path, 'w', encoding='utf-8') as f:
+                json.dump(all_keys, f, ensure_ascii=False, indent=2)
+            print('Initialised known PDGA discs list with', len(all_keys), 'entries')
+        except Exception as e:
+            print('Failed to initialise known PDGA discs file:', e)
+        return
+
+    if not new_rows:
+        print('No new PDGA discs found')
+        return
+
+    # Build a compact embed listing the newly approved discs (limit to 10)
+    lines = []
+    for row in new_rows[:10]:
+        manu = (row.get('Manufacturer / Distributor') or '').strip()
+        model = (row.get('Disc Model') or '').strip()
+        disc_class = (row.get('Class') or '').strip()
+        approved = (row.get('Approved Date') or '').strip()
+        max_weight = (row.get('Max Weight (gr)') or '').strip()
+        diameter = (row.get('Diameter (cm)') or '').strip()
+
+        parts = []
+        title = model or 'Tuntematon malli'
+        parts.append(title)
+        if manu:
+            parts.append(f'Valmistaja: {manu}')
+        if approved:
+            parts.append(f'Hyväksytty: {approved}')
+        if disc_class:
+            parts.append(f'Luokka: {disc_class}')
+        if max_weight:
+            parts.append(f'Max paino: {max_weight} g')
+        if diameter:
+            parts.append(f'Halkaisija: {diameter} cm')
+
+        lines.append('\n'.join(parts))
+
+    if len(new_rows) > 10:
+        lines.append(f'...ja {len(new_rows)-10} muuta uutta kiekkoa')
+
+    desc = '\n\n'.join(lines)
+
+    target = DISCORD_DISCS_THREAD_ID or os.environ.get('DISCORD_PDGA_THREAD') or os.environ.get('DISCORD_CHANNEL_ID')
+    if not target:
+        print('No thread/channel configured for PDGA discs alerts; skipping post')
+    else:
+        embed = {
+            'title': 'Uusia PDGA-hyväksyttyjä kiekkoja',
+            'description': desc,
+            'color': 5763714,
+        }
+        try:
+            ok = post_embeds_to_discord(target, token, [embed])
+            if ok:
+                print('Posted new PDGA discs alert to Discord')
+            else:
+                print('Failed to post new PDGA discs alert')
+        except Exception as e:
+            print('Exception while posting PDGA discs alert:', e)
+
+    # Update known file with all current keys
+    try:
+        with open(known_path, 'w', encoding='utf-8') as f:
+            json.dump(all_keys, f, ensure_ascii=False, indent=2)
+        print('Updated known PDGA discs file with', len(all_keys), 'entries')
+    except Exception as e:
+        print('Failed to update known PDGA discs file:', e)
+
+
+def start_pdga_discs_worker(base_dir, interval_seconds: int):
+    """Background worker that periodically checks for new PDGA discs."""
+    def worker():
+        while True:
+            try:
+                _check_new_pdga_discs_once(base_dir)
+            except Exception as e:
+                print('PDGA discs worker error:', e)
+            time.sleep(max(600, int(interval_seconds)))
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+    return t
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='metrixDiscordBot orchestrator')
@@ -817,6 +965,13 @@ def main():
             print('Capacity worker started (interval', cap_interval, 's)')
         except Exception as e:
             print('Failed to start capacity worker:', e)
+        # start PDGA discs watcher worker thread (default once per day)
+        try:
+            discs_interval = int(os.environ.get('DISCS_CHECK_INTERVAL', '86400'))
+            start_pdga_discs_worker(BASE_DIR, discs_interval)
+            print('PDGA discs worker started (interval', discs_interval, 's)')
+        except Exception as e:
+            print('Failed to start PDGA discs worker:', e)
         while True:
             try:
                 run_once()
