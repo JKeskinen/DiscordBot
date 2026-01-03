@@ -45,6 +45,13 @@ def _general_help_description() -> str:
         "• !tulokset [ep|pohj|kp|ks|pirk|sata|mk|suomi]\n"
         "• !tulokset kisa <Metrix-linkki tai ID>\n"
 
+        "\n"
+        "🏅 SeuraRanking\n"
+        "Seuraa seuran pelaajien menestystä: botin keräämät podium-sijoitukset ja top-tilastot.\n"
+        "Komennot:\n"
+        "• !seura ranking  — Näytä nykyinen top-lista (oletus top 10)\n"
+        "• !seura <n>  — Näytä top n pelaajaa (esim. !seura 5)\n"
+
     )
 
 
@@ -166,6 +173,46 @@ def _tulospalvelu_help_description() -> str:
     )
 
 
+def _pelaajaranking_help_description() -> str:
+    return (
+        "PelaajaRanking\n"
+        "🏅 Seuran kovimmat menestyjät\n\n"
+        "Botti kirjaa automaattisesti Lakeus Disc Golf -seuran pelaajien Top3-sijoituksia\n"
+        "ja säilyttää ne tiedostossa `komento_koodit/club_successes.json`.\n\n"
+        "Miten nähdä menestyjät nyt:\n"
+        "• Käynnistä `!tulokset` (yksittäinen kilpailu tai viikkari) — botti ilmoittaa löydöistä automaattisesti.\n"
+        "  Onnitteluviesti on lyhyt: ensimmäisellä rivillä kilpailun nimi ja linkki,\n"
+        "  sen alla sijoitusrivit (esim. '1) Etunimi Sukunimi -3 (53)').\n"
+        "  Botti suosii raakatuloksia ennen tasoitettuja (HC)-rivejä,\n"
+        "  huomioi tasapelit (kaikki sijalla 3 listataan) ja ohittaa Sum==0 (DNS)-rivit.\n"
+        "• Katso kertynyt lista suoraan tiedostosta: `komento_koodit/club_successes.json`.\n"
+        "• Dev-työkaluina on myös `scripts/simulate_tulokset_3523248.py` ja `scripts/simulate_force_detect_23665.py`,\n"
+        "  jotka voivat näyttää ja päivittää `club_successes.json` testitarkoituksia varten.\n\n"
+        "Tulevaisuudessa voidaan lisätä suora komentorakenne (esim. `!seura menestys`),\n"
+        "jolla haetaan ja järjestetään top-pelaajat suoraan botin kautta."
+    )
+
+
+    def _seuraranking_help_description() -> str:
+        return (
+            "SeuraRanking\n"
+            "🏆 Seuran menestys ja ranking\n\n"
+            "Botti kerää ja ylläpitää seuran pelaajien top-sijoituksia ja muita seurantamittareita\n"
+            "tiedostossa `komento_koodit/club_successes.json` ja muissa lokitiedoissa."
+            "\n\n"
+            "Miten käyttää:\n"
+            "• !seura ranking - Näytä nykyinen top-lista seuran menestyjistä (esim. top-pelaajat ja sijoitukset)\n"
+            "• !seura menestys - Yhteenveto kauden onnistumisista ja podium-sijoituksista\n"
+            "• !seura päivitä - (admin) Päivitä club_successes.json historiasta tai simulaatiolla\n\n"
+            "Missä data tulee:\n"
+            "• Automaattilöydöt !tulokset-ajosta: botti tunnistaa seurapelaajat ja kirjaa Top3-sijoituksia\n"
+            "• Manuaalinen ylläpito: tiedoston muokkaus tai dev-skriptit `scripts/`-hakemistossa\n\n"
+            "Tulevaisuuden ideat:\n"
+            "• Komentoja suodattamiseen (kausi, luokka, kategoria)\n"
+            "• Pysyvä leaderboard Discordiin upotettuna\n"
+        )
+
+
 def get_help_message(topic: Optional[str] = None) -> Dict[str, str]:
     """Palauta otsikko- ja kuvausteksti annetulle ohjeaiheelle.
 
@@ -190,5 +237,11 @@ def get_help_message(topic: Optional[str] = None) -> Dict[str, str]:
 
     if normalized in {"tulokset", "tulospalvelu"}:
         return {"title": BASE_TITLE, "description": _tulospalvelu_help_description()}
+
+    if normalized in {"pelaajaranking", "pelaaja ranking", "ranking", "seuramenestys", "menestys", "menestyjät"}:
+        return {"title": "PelaajaRanking", "description": _pelaajaranking_help_description()}
+
+        if normalized in {"seuraranking", "seura ranking", "seura", "seuran", "seura menestys", "seura_ranking"}:
+            return {"title": "SeuraRanking", "description": _seuraranking_help_description()}
 
     return {"title": BASE_TITLE, "description": _general_help_description()}

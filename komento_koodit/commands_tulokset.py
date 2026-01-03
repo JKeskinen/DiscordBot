@@ -5,6 +5,7 @@ from datetime import datetime, date, timedelta
 from typing import Any, Dict, List, Optional
 
 import requests
+import json
 from bs4 import BeautifulSoup as BS
 
 try:
@@ -30,6 +31,130 @@ _RATING_CACHE: Dict[str, Optional[float]] = {}
 
 # Set to True during local debugging to enable console debug prints for this module.
 DEBUG_TULOKSET = False
+
+# Base dir for persistence (club successes)
+BASE_DIR = os.path.abspath(os.path.dirname(__file__) or "")
+CLUB_SUCCESS_FILE = os.path.join(BASE_DIR, "club_successes.json")
+
+# Temporary accumulator for detections during a single command run.
+# Each entry is a dict: {"metrix_id":..., "name":..., "club":...}
+CLUB_DETECTIONS: List[Dict[str, str]] = []
+
+
+def _load_club_successes() -> Dict[str, Dict]:
+    try:
+        with open(CLUB_SUCCESS_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f) or {}
+    except FileNotFoundError:
+        return {}
+    except Exception:
+        return {}
+
+
+def _save_club_successes(data: Dict[str, Dict]) -> None:
+    try:
+        with open(CLUB_SUCCESS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _increment_club_success(metrix_id: str, name: str, club: str, context: Optional[str] = None) -> None:
+    if not metrix_id:
+        return
+    data = _load_club_successes()
+    key = str(metrix_id)
+    entry = data.get(key) or {"name": name, "club": club, "count": 0, "events": []}
+    try:
+        entry['name'] = name or entry.get('name')
+        entry['club'] = club or entry.get('club')
+        entry['count'] = int(entry.get('count', 0)) + 1
+        ev = {"when": datetime.utcnow().isoformat() + 'Z'}
+        if context:
+            ev['context'] = context
+        entry.setdefault('events', []).append(ev)
+        data[key] = entry
+        _save_club_successes(data)
+    except Exception:
+        pass
+
+
+async def handle_seura(message, parts: List[str]):
+    """Handle '!seura' commands. Supported subcommands:
+    - 'ranking' or no arg: show top-N club successes (default top 10)
+    - number as first arg: show that many entries
+    """
+    try:
+        data = _load_club_successes() or {}
+    except Exception:
+        data = {}
+
+    if not data:
+        try:
+            await message.channel.send('Ei löydy seuramenestyksiä (club_successes.json tyhjä).')
+        except Exception:
+            pass
+        return
+
+    # Allow '!seura ranking' or '!seura 5' etc.
+    top_n = 10
+    if len(parts) >= 2:
+        arg = parts[1].strip()
+        if arg.isdigit():
+            try:
+                top_n = min(50, max(1, int(arg)))
+            except Exception:
+                top_n = 10
+        elif arg.lower() == 'ranking' or arg.lower() == 'menestys':
+            top_n = 10
+
+    # Compute unique podium count per player by deduping event contexts
+    def _unique_podium_count(entry: Dict[str, Any]) -> int:
+        try:
+            evs = entry.get('events') or []
+            uniques = set()
+            for ev in evs:
+                key = None
+                if isinstance(ev, dict):
+                    key = ev.get('context') or ev.get('when')
+                else:
+                    key = str(ev)
+                if key:
+                    uniques.add(str(key))
+            if uniques:
+                return len(uniques)
+        except Exception:
+            pass
+        try:
+            return int(entry.get('count') or 0)
+        except Exception:
+            return 0
+
+    # Sort entries by unique podium count desc
+    try:
+        items = sorted(data.items(), key=lambda kv: _unique_podium_count(kv[1]), reverse=True)
+    except Exception:
+        items = list(data.items())
+
+    lines = []
+    for idx, (mid, entry) in enumerate(items[:top_n], start=1):
+        name = entry.get('name') or ''
+        club = entry.get('club') or ''
+        count = _unique_podium_count(entry)
+        lines.append(f"{idx}) {name} — {count} Podiumia ({club})")
+
+    header = f"SeuraRanking — top {min(top_n, len(items))}"
+    msg = header + "\n" + "\n".join(lines)
+    try:
+        await message.channel.send(msg)
+    except Exception:
+        # best-effort: if sending fails, try split into multiple messages
+        try:
+            for chunk_start in range(0, len(lines), 10):
+                chunk = lines[chunk_start:chunk_start+10]
+                await message.channel.send(header + "\n" + "\n".join(chunk))
+        except Exception:
+            pass
 
 
 def _get_player_rating_from_metrix(metrix_id: str) -> Optional[float]:
@@ -60,6 +185,126 @@ def _get_player_rating_from_metrix(metrix_id: str) -> Optional[float]:
 
     _RATING_CACHE[mid] = rating_val
     return rating_val
+
+
+def _detect_club_memberships_for_event(result: Dict[str, Any], hc_rows: List[Dict[str, Any]], event_name: str) -> List[Dict[str, Any]]:
+    """Scan result & hc_rows for players, prefer raw over HC, detect Lakeus club membership.
+
+    Returns list of detection dicts with keys: metrix_id, name, club, position, total, class_name, event_name
+    """
+    detections: List[Dict[str, Any]] = []
+    if not result:
+        return detections
+
+    # Build mapping of players from raw results: key by metrix_id if present, else by name
+    player_map: Dict[str, Dict[str, Any]] = {}
+    name_to_id: Dict[str, str] = {}
+
+    for cls in result.get("classes", []):
+        class_name = str(cls.get("class_name") or "")
+        for r in cls.get("rows", []) or []:
+            try:
+                pos = r.get("position")
+                total_txt = str(r.get("total") or "").strip()
+                m = re.match(r"-?\d+", total_txt)
+                total_num = int(m.group(0)) if m else None
+                if not isinstance(pos, int) or total_num == 0:
+                    continue
+            except Exception:
+                continue
+
+            mid = str(r.get("metrix_id") or "").strip()
+            name = str(r.get("name") or "").strip()
+            entry = {
+                "metrix_id": mid,
+                "name": name,
+                "position": pos,
+                "total": total_txt,
+                "to_par": str(r.get("to_par") or ""),
+                "class_name": class_name,
+                "event_name": event_name,
+                "source": "raw",
+            }
+            key = mid if mid else name.lower()
+            player_map[key] = entry
+            if mid and name:
+                name_to_id[name.lower()] = mid
+
+    # Include HC rows only if player not already in raw mapping (prefer raw)
+    for r in (hc_rows or []):
+        try:
+            pos = r.get("position")
+            if not isinstance(pos, int):
+                continue
+        except Exception:
+            continue
+        name = str(r.get("name") or "").strip()
+        if not name:
+            continue
+        ln = name.lower()
+        # If this name exists in raw mapping, skip HC (preference)
+        if ln in name_to_id:
+            continue
+        # Otherwise, we can't reliably fetch metrix_id; skip unless we somehow find an id
+        # (future improvement: search Metrix by name). Skip for now.
+
+    # Now check each mapped player for Lakeus club membership
+    for key, p in list(player_map.items()):
+        mid = p.get("metrix_id") or ""
+        name = p.get("name") or ""
+        if not name:
+            continue
+        pst = None
+        try:
+            if mid and metrix_stats is not None:
+                try:
+                    pst = metrix_stats.fetch_player_stats(mid)
+                except Exception:
+                    pst = None
+
+            # Fallback: try unauthenticated fetch if no pst and mid is present
+            if not pst and mid and metrix_stats is not None:
+                try:
+                    resp = requests.get(f"{BASE_ROOT_URL}/player/{mid}", timeout=20)
+                    if resp.status_code == 200 and resp.text:
+                        try:
+                            pst = metrix_stats._parse_player_stats(resp.text, mid)
+                        except Exception:
+                            pst = None
+                except Exception:
+                    pst = None
+        except Exception:
+            pst = None
+
+        if not pst:
+            continue
+
+        clubs = getattr(pst, 'clubs', None) or []
+        # try to extract rating if present on the fetched player stats
+        try:
+            rating_val = getattr(pst, 'rating', None)
+            rating_str = str(rating_val) if rating_val is not None else ""
+        except Exception:
+            rating_str = ""
+        for c in clubs:
+            try:
+                if 'lakeus disc golf' in c.lower():
+                    detections.append({
+                        'metrix_id': mid or '',
+                        'name': name,
+                        'club': c,
+                        'rating': rating_str,
+                        'to_par': str(p.get('to_par') or ''),
+                        'position': p.get('position'),
+                        'total': p.get('total'),
+                        'class_name': p.get('class_name'),
+                        'event_name': event_name,
+                    })
+                    break
+            except Exception:
+                continue
+
+    return detections
 
 
 def _extract_competition_id(raw: str) -> Optional[str]:
@@ -634,6 +879,73 @@ def _fetch_handicap_table(url: str) -> List[Dict[str, Any]]:
                     "change": change,
                 })
             return rows
+    # Some pages (eg. older HC layouts) place the HC table directly under #content_auto
+    # with classes `table.data.data-hover`. Try that selector as a fallback.
+    try:
+        hover_table = content.select_one("#content_auto > table.data.data-hover")
+        if hover_table:
+            # Try to map header columns (if present) to indices
+            header_ths = [th.get_text(strip=True).lower() for th in hover_table.find_all("th")]
+            pos_i = None
+            name_i = None
+            metrix_i = None
+            score_i = None
+            change_i = None
+            for i, h in enumerate(header_ths):
+                if "pos" in h or h.startswith("sij") or h.startswith("sija") or "place" in h:
+                    pos_i = i
+                elif "name" in h or "pelaaja" in h or "nimi" in h:
+                    name_i = i
+                elif "metrix" in h or "rating of metrix" in h or "metrix rating" in h:
+                    metrix_i = i
+                elif "rating of score" in h or "score" in h or "tuloksen" in h:
+                    score_i = i
+                elif "change" in h or "muutos" in h:
+                    change_i = i
+
+            rows = []
+            for tr in hover_table.find_all("tr"):
+                tds = tr.find_all("td")
+                if not tds:
+                    continue
+                # Heuristics: default mapping when header not informative
+                if name_i is None and len(tds) >= 2:
+                    pos_txt = tds[0].get_text(strip=True)
+                    name_txt = tds[1].get_text(strip=True)
+                    mrt = tds[2].get_text(strip=True) if len(tds) > 2 else ""
+                    srt = tds[3].get_text(strip=True) if len(tds) > 3 else ""
+                    chg = tds[4].get_text(strip=True) if len(tds) > 4 else ""
+                else:
+                    def safe_get(i):
+                        try:
+                            return tds[i].get_text(strip=True)
+                        except Exception:
+                            return ""
+
+                    pos_txt = safe_get(pos_i) if pos_i is not None else safe_get(0)
+                    name_txt = safe_get(name_i) if name_i is not None else safe_get(1)
+                    mrt = safe_get(metrix_i) if metrix_i is not None else safe_get(2)
+                    srt = safe_get(score_i) if score_i is not None else safe_get(3)
+                    chg = safe_get(change_i) if change_i is not None else safe_get(4)
+
+                try:
+                    m = re.match(r"(\d+)", pos_txt or "")
+                    pos = int(m.group(1)) if m else None
+                except Exception:
+                    pos = None
+
+                rows.append({
+                    "position": pos,
+                    "name": name_txt,
+                    "metrix_rating": mrt,
+                    "score_rating": srt,
+                    "change": chg,
+                })
+            if rows:
+                return rows
+    except Exception:
+        pass
+
     return []
 
 
@@ -699,6 +1011,9 @@ def _format_top3_lines_for_result(result: Dict[str, Any], hc_present: bool = Fal
                 total = str(r.get("total") or "")
                 rating = str(r.get("rating") or "").strip()
 
+                # Club detection runs in the handler (not here) to avoid
+                # repeated fetches and to aggregate congrats messages.
+
                 tail = ""
                 if to_par:
                     tail += f" {to_par}"
@@ -760,6 +1075,73 @@ def _format_hc_top3_lines(hc_rows: List[Dict[str, Any]]) -> List[str]:
         lines.append(f"{pos_s} {name} — {tail}")
 
     return lines
+
+
+def _format_club_success_announcement(detections: List[Dict[str, Any]]) -> str:
+    """Build aggregated Lakeus Disc Golf announcement text from detections.
+
+    Outputs a block with header, then Viikkokisat and PDGA sections listing
+    players with counts and win counts, e.g.:
+    __Lakeus Disc Golf ry Palkintosijat__
+    __Viikkokisat__
+    1) Janne Sinisalmi (3)kpl, joista voittoja (1)kpl
+    ...
+    __PDGA__
+    ...
+    """
+    if not detections:
+        return ""
+
+    # Group detections into viikkokisat vs pdga by event_name heuristic
+    viikka = []
+    pdga = []
+    for d in detections:
+        en = str(d.get('event_name') or "").lower()
+        if 'pdga' in en:
+            pdga.append(d)
+        else:
+            viikka.append(d)
+
+    def aggregate(lst: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        by_player: Dict[str, Dict[str, Any]] = {}
+        for it in lst:
+            key = str(it.get('metrix_id') or (it.get('name') or '')).strip() or (it.get('name') or '').lower()
+            entry = by_player.get(key) or {'name': it.get('name') or '', 'count': 0, 'wins': 0}
+            entry['count'] = entry.get('count', 0) + 1
+            try:
+                pos = int(it.get('position') or 0)
+            except Exception:
+                pos = 0
+            if pos == 1:
+                entry['wins'] = entry.get('wins', 0) + 1
+            by_player[key] = entry
+        # Return sorted list by count desc, then wins desc, then name
+        return sorted(by_player.values(), key=lambda x: (-int(x.get('count', 0)), -int(x.get('wins', 0)), x.get('name', '')))
+
+    vi_agg = aggregate(viikka)
+    pd_agg = aggregate(pdga)
+
+    out: List[str] = []
+    out.append("__Lakeus Disc Golf ry Palkintosijat__")
+
+    if vi_agg:
+        out.append("__Viikkokisat__")
+        for i, p in enumerate(vi_agg, start=1):
+            name = p.get('name') or ''
+            cnt = int(p.get('count', 0))
+            wins = int(p.get('wins', 0))
+            out.append(f"{i}) {name} {cnt}kpl, joista voittoja {wins}kpl")
+        out.append("")
+
+    if pd_agg:
+        out.append("__PDGA__")
+        for i, p in enumerate(pd_agg, start=1):
+            name = p.get('name') or ''
+            cnt = int(p.get('count', 0))
+            wins = int(p.get('wins', 0))
+            out.append(f"{i}) {name} {cnt}kpl, joista voittoja {wins}kpl")
+
+    return "\n".join(out)
 
 
 async def _handle_single_viikkari_results(message: Any, raw: str) -> None:
@@ -841,6 +1223,85 @@ async def _handle_single_viikkari_results(message: Any, raw: str) -> None:
             await message.channel.send(desc)
         except Exception:
             pass
+
+    # After posting results, run Top3-only club detection (no need to re-fetch whole competition)
+    try:
+        # Build a trimmed result containing only Top3 rows (including ties) per class
+        filtered_classes: List[Dict[str, Any]] = []
+        for cls in classes:
+            rows = cls.get("rows") or []
+            top_rows: List[Dict[str, Any]] = []
+            count_3 = 0
+            for r in rows:
+                pos = r.get("position")
+                total = str(r.get("total") or "")
+                try:
+                    total_num = int(total)
+                except Exception:
+                    total_num = None
+                if not isinstance(pos, int) or total_num == 0:
+                    continue
+                if pos == 1 or pos == 2:
+                    top_rows.append(r)
+                elif pos == 3:
+                    count_3 += 1
+            if count_3 > 0:
+                for r in rows:
+                    pos = r.get("position")
+                    total = str(r.get("total") or "")
+                    try:
+                        total_num = int(total)
+                    except Exception:
+                        total_num = None
+                    if isinstance(pos, int) and pos == 3 and total_num != 0 and r not in top_rows:
+                        top_rows.append(r)
+            filtered_classes.append({"class_name": cls.get("class_name"), "rows": top_rows})
+
+        trimmed_result = {"event_name": event_name, "classes": filtered_classes}
+        detections = _detect_club_memberships_for_event(trimmed_result, hc_table, event_name)
+        if detections:
+            try:
+                # Persist detections
+                for d in detections:
+                    try:
+                        _increment_club_success(d.get('metrix_id') or '', d.get('name') or '', d.get('club') or '', context=f"Kisa {event_name}")
+                    except Exception:
+                        pass
+
+                # Build concise per-event announcement: link + simple player lines
+                out: List[str] = []
+                out.append(f"[{event_name}]({url})")
+                # Sort detections by position when possible
+                try:
+                    detections_sorted = sorted(detections, key=lambda x: int(x.get('position') or 0))
+                except Exception:
+                    detections_sorted = detections
+                for d in detections_sorted:
+                    pos = d.get('position')
+                    pname = d.get('name') or ''
+                    to_par = str(d.get('to_par') or '').strip()
+                    if to_par:
+                        out.append(f"{pos}) {pname} {to_par}")
+                    else:
+                        out.append(f"{pos}) {pname}")
+
+                msg = "\n".join(out)
+                try:
+                    Embed_cls = getattr(discord, "Embed", None) if discord is not None else None
+                    if Embed_cls:
+                        embed = Embed_cls(title=f"Onnittelut Lakeus Disc Golf -seuran pelaajille!", description=msg)
+                        await message.channel.send(embed=embed)
+                    else:
+                        await message.channel.send(msg)
+                except Exception:
+                    try:
+                        await message.channel.send(msg)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 async def _handle_weekly_viikkari_results(message: Any, area_mode: str) -> None:
@@ -1005,10 +1466,22 @@ async def _handle_weekly_viikkari_results(message: Any, area_mode: str) -> None:
 
     lines: List[str] = []
     first_event = True
+    week_detections: List[Dict[str, Any]] = []
+
+    # Progress tracking
+    processed = 0
+    total_events = len(week_entries)
+    est_seconds = int(min(max(1, total_events * 1.5), 300))
+    print(f"[TULOKSET] Aloitetaan viikon viikkarit: {total_events} tapahtumaa, arvioitu ~{est_seconds}s")
+    try:
+        await message.channel.send(f"Haetaan {total_events} tapahtumaa — arvioitu käsittelyaika ~{est_seconds}s. Lähetän tulokset, kun valmiina.")
+    except Exception:
+        pass
 
     # Do not send debug messages to Discord; keep console debug behind DEBUG_TULOKSET
     for e in sorted(week_entries, key=lambda x: str(x.get("date") or "")):
         title = str(e.get("title") or "")
+        print(f"[TULOKSET] Aloitetaan käsittely tapahtumalle: {title}")
         url_raw = str(e.get("url") or "")
         if not url_raw:
             continue
@@ -1076,6 +1549,50 @@ async def _handle_weekly_viikkari_results(message: Any, area_mode: str) -> None:
             lines.extend(raw_lines)
         if hc_lines_local:
             lines.extend(hc_lines_local)
+        # Detect Lakeus players from Top3-only of this event and accumulate
+        try:
+            filtered_classes: List[Dict[str, Any]] = []
+            for cls in result.get("classes", []):
+                rows = cls.get("rows") or []
+                top_rows: List[Dict[str, Any]] = []
+                count_3 = 0
+                for r in rows:
+                    pos = r.get("position")
+                    total = str(r.get("total") or "")
+                    try:
+                        total_num = int(total)
+                    except Exception:
+                        total_num = None
+                    if not isinstance(pos, int) or total_num == 0:
+                        continue
+                    if pos == 1 or pos == 2:
+                        top_rows.append(r)
+                    elif pos == 3:
+                        count_3 += 1
+                if count_3 > 0:
+                    for r in rows:
+                        pos = r.get("position")
+                        total = str(r.get("total") or "")
+                        try:
+                            total_num = int(total)
+                        except Exception:
+                            total_num = None
+                        if isinstance(pos, int) and pos == 3 and total_num != 0 and r not in top_rows:
+                            top_rows.append(r)
+                filtered_classes.append({"class_name": cls.get("class_name"), "rows": top_rows})
+
+            trimmed_result = {"event_name": event_name, "classes": filtered_classes}
+            dets = _detect_club_memberships_for_event(trimmed_result, hc_table, event_name)
+            if dets:
+                # attach event URL to each detection for later per-event announcements
+                for dd in dets:
+                    try:
+                        dd['event_url'] = url
+                    except Exception:
+                        pass
+                week_detections.extend(dets)
+        except Exception:
+            pass
 
     desc = "\n".join(lines) if lines else "Tälle viikolle ei löytynyt tulostettavia viikkarikisoja."
 
@@ -1083,7 +1600,10 @@ async def _handle_weekly_viikkari_results(message: Any, area_mode: str) -> None:
         Embed_cls = getattr(discord, "Embed", None) if discord is not None else None
         if Embed_cls:
             area_label = "Etelä-Pohjanmaa" if mode == "ep" else ("lähimaakunnat" if mode == "seutu" else "maakunnat")
-            title = f"Tämän viikon viikkaritulokset – {area_label}"
+            if mode == "seutu":
+                title = "Tuoreimmat tulokset lähialueilta"
+            else:
+                title = f"Tämän viikon viikkaritulokset – {area_label}"
             embed = Embed_cls(title=title, description=desc)
             await message.channel.send(embed=embed)
         else:
@@ -1093,6 +1613,63 @@ async def _handle_weekly_viikkari_results(message: Any, area_mode: str) -> None:
             await message.channel.send(desc)
         except Exception:
             pass
+    # After posting weekly summary for the area, announce any detected Lakeus Disc Golf successes
+    try:
+        if week_detections:
+            print(f"[TULOKSET] Löytyi {len(week_detections)} Lakeus-pelaajaa viikon Top3:sta; tallennetaan ja ilmoitetaan.")
+            # Persist detections
+            for d in week_detections:
+                try:
+                    _increment_club_success(d.get('metrix_id') or '', d.get('name') or '', d.get('club') or '', context=f"Viikkarit {mode}")
+                except Exception:
+                    pass
+
+            # Build per-event concise announcements (link + simple player lines)
+            try:
+                # Group detections by event_url (fallback to event_name)
+                events_map: Dict[str, Dict[str, Any]] = {}
+                for d in week_detections:
+                    urlk = str(d.get('event_url') or d.get('event_name') or '(nimetön)')
+                    entry = events_map.get(urlk) or {'name': d.get('event_name') or '(nimetön)', 'items': []}
+                    entry['items'].append(d)
+                    events_map[urlk] = entry
+
+                for urlk, ed in events_map.items():
+                    ev_name = ed.get('name') or urlk
+                    items = ed.get('items') or []
+                    try:
+                        items_sorted = sorted(items, key=lambda x: int(x.get('position') or 0))
+                    except Exception:
+                        items_sorted = items
+
+                    out_lines: List[str] = []
+                    out_lines.append(f"[{ev_name}]({urlk})")
+                    for d in items_sorted:
+                        pos = d.get('position')
+                        pname = d.get('name') or ''
+                        to_par = str(d.get('to_par') or '').strip()
+                        if to_par:
+                            out_lines.append(f"{pos}) {pname} {to_par}")
+                        else:
+                            out_lines.append(f"{pos}) {pname}")
+
+                    msg = "\n".join(out_lines)
+                    try:
+                        Embed_cls = getattr(discord, "Embed", None) if discord is not None else None
+                        if Embed_cls:
+                            embed = Embed_cls(title="Onnittelut Lakeus Disc Golf -seuran pelaajille!", description=msg)
+                            await message.channel.send(embed=embed)
+                        else:
+                            await message.channel.send(msg)
+                    except Exception:
+                        try:
+                            await message.channel.send(msg)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 async def handle_tulokset(message: Any, parts: Any) -> None:

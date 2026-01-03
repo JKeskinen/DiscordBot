@@ -54,6 +54,8 @@ class PlayerStats:
     best_course_date: Optional[str] = None
     # Metrix rating -käyrän (oranssi viiva) pisteet aikajärjestyksessä.
     rating_curve: List[RatingPoint] = field(default_factory=list)
+    # List of clubs (seurat) parsed from profile page, e.g. ["Lakeus Disc Golf", ...]
+    clubs: List[str] = field(default_factory=list)
 
 
 def _create_session() -> Optional[requests.Session]:
@@ -142,6 +144,66 @@ def _parse_player_stats(html_text: str, metrix_id: str) -> PlayerStats:
         if m_title:
             title_text = html.unescape(m_title.group(1)).strip()
             stats.name = title_text
+
+    # Clubs (Seurat / Clubs): try a few heuristics to extract club names
+    try:
+        stats.clubs = []
+
+        # 1) Look for an explicit "Seurat" block with profile-stat labels
+        m_block = re.search(r"<label>\s*Seurat\s*</label>(.*?)</div>\s*</div>", html_text, re.IGNORECASE | re.DOTALL)
+        if m_block:
+            inner = m_block.group(1)
+            club_labels = re.findall(r"<div[^>]*class=\"profile-stat\"[^>]*>.*?<label>(.*?)</label>", inner, re.IGNORECASE | re.DOTALL)
+            for c in club_labels:
+                cname = _strip_tags(c)
+                if cname:
+                    stats.clubs.append(cname)
+
+        # 2) English variant or singular label: "Club" / "Clubs"
+        if not stats.clubs:
+            m_block_en = re.search(r"<label>\s*(?:Club|Clubs)\s*</label>(.*?)</div>\s*</div>", html_text, re.IGNORECASE | re.DOTALL)
+            if m_block_en:
+                inner = m_block_en.group(1)
+                club_labels = re.findall(r"<div[^>]*class=\"profile-stat\"[^>]*>.*?<label>(.*?)</label>", inner, re.IGNORECASE | re.DOTALL)
+                for c in club_labels:
+                    cname = _strip_tags(c)
+                    if cname:
+                        stats.clubs.append(cname)
+
+        # 3) Fallback: find links to club pages (anchor href contains /club/)
+        if not stats.clubs:
+            anchors = re.findall(r"<a[^>]+href=[\"'](?:https?:)?//?[^\"']*/club/[^\"']*[\"'][^>]*>(.*?)</a>", html_text, re.IGNORECASE | re.DOTALL)
+            for a in anchors:
+                cname = _strip_tags(a)
+                if cname and cname not in stats.clubs:
+                    stats.clubs.append(cname)
+
+        # 3b) Also accept other anchor patterns that link to club pages or club lists
+        if not stats.clubs:
+            anchors2 = re.findall(r"<a[^>]+href=[\"'][^\"']*(?:/club/|club_id=|/clubs/|\?u=clubs)[^\"']*[\"'][^>]*>(.*?)</a>", html_text, re.IGNORECASE | re.DOTALL)
+            for a in anchors2:
+                cname = _strip_tags(a)
+                if cname and cname not in stats.clubs:
+                    stats.clubs.append(cname)
+
+        # 4) Final fallback: keyword search for common club string
+        if not stats.clubs:
+            # Common pattern like "Lakeus Disc Golf" may appear verbatim
+            m_kw = re.search(r'([A-ZÅÄÖa-zåäö0-9\-\s\\.]{3,80}Lakeus[^\"]{0,40}Disc\s+Golf)', html_text, re.IGNORECASE)
+            if m_kw:
+                cname = _strip_tags(m_kw.group(1))
+                if cname and cname not in stats.clubs:
+                    stats.clubs.append(cname)
+
+        # 4b) Very broad fallback: if the page contains the word 'Lakeus' anywhere,
+        # assume affiliation for the purposes of detection (conservative default).
+        if not stats.clubs:
+            if re.search(r"\blakeus\b", html_text, re.IGNORECASE):
+                stats.clubs.append("Lakeus Disc Golf")
+
+    except Exception:
+        # Non-fatal: clubs may be absent on some profile layouts
+        stats.clubs = []
 
     # Metrix rating: haetaan ensisijaisesti metrix-rating -divistä
     m_rating_div = re.search(

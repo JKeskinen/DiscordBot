@@ -230,6 +230,14 @@ class CommandListenerThread(threading.Thread):
                         await message.channel.send('Ohje ei ole käytettävissä.')
                     return
 
+                # --- !seura: club / ranking commands ---
+                if command == 'seura':
+                    if tulokset_commands is not None and hasattr(tulokset_commands, 'handle_seura'):
+                        await tulokset_commands.handle_seura(message, parts)
+                    else:
+                        await message.channel.send('Virhe: seura-komentoa ei voi suorittaa (moduuli puuttuu).')
+                    return
+
                 # --- !paikat: capacity alerts (delegated) ---
                 if command == 'paikat':
                     if spots_commands is not None and hasattr(spots_commands, 'handle_spots'):

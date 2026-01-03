@@ -34,7 +34,7 @@ def guess_class_name(table, idx):
         if thead:
             ths = thead.find_all('th')
             for th in ths:
-                txt = th.get_text(' ', strip=True)
+                txt = str(th.get_text(' ', strip=True))
                 if txt and re.search(r"\([0-9]+\)", txt) and not txt.lower().startswith('sija'):
                     name = txt
                     break
@@ -92,7 +92,7 @@ for idx, table in enumerate(tables):
         try:
             link = player_td.find('a', href=True)
             if link:
-                href = link.get('href') or ''
+                href = str(link.get('href') or '')
                 m_id = re.search(r"/player/(\d+)", href)
                 if m_id:
                     metrix_id = m_id.group(1)

@@ -61,9 +61,10 @@ CURRENT_CAPACITY_INTERVAL = CHECK_INTERVAL
 LAST_DIGEST_DATE: Optional[date] = None
 
 # Päivittäisen kilpailudigestin (PDGA + viikkarit + rekisteröinnit) kellonaika.
-# Voit muuttaa näitä esim. .env-tiedostossa: DAILY_DIGEST_HOUR=6, DAILY_DIGEST_MINUTE=0
-DAILY_DIGEST_HOUR = int(os.environ.get('DAILY_DIGEST_HOUR', '11'))  # 0-23
-DAILY_DIGEST_MINUTE = int(os.environ.get('DAILY_DIGEST_MINUTE', '05'))  # 0-59
+# Voit muuttaa näitä esim. .env-tiedostossa: DAILY_DIGEST_HOUR=4, DAILY_DIGEST_MINUTE=0
+# Oletusarvo ajettu klo 04:00:00
+DAILY_DIGEST_HOUR = int(os.environ.get('DAILY_DIGEST_HOUR', '4'))  # 0-23
+DAILY_DIGEST_MINUTE = int(os.environ.get('DAILY_DIGEST_MINUTE', '00'))  # 0-59
 
 CACHE_FILE = os.environ.get('CACHE_FILE', 'known_pdga_competitions.json')
 REG_CHECK_FILE = os.environ.get('REG_CHECK_FILE', 'pending_registration.json')
@@ -268,12 +269,11 @@ def post_startup_capacity_alerts(base_dir: str, token: Optional[str]):
         print('Failed to post startup capacity summary; check target ID and bot permissions')
     except Exception as e:
         print('Exception posting startup capacity summary:', e)
-
-
 def run_once():
-    _load_dotenv()
     # Import modules from komento_koodit (entinen hyvat_koodit)
     import komento_koodit.search_pdga_sfl as pdga_mod
+    # Import tulokset module for competition result parsing and club detection
+    import komento_koodit.commands_tulokset as tulokset_mod
     # Importing weekly module executes it and writes VIIKKOKISA.json
     import komento_koodit.search_weekly_fast as weekly_mod
     # Seutu-viikkarit (EP + naapurimaakunnat) kirjoitetaan erilliseen JSONiin
@@ -383,6 +383,83 @@ def run_once():
         return False
 
     pdga_display_list = [c for c in pdga_list if not _is_pdga_container(c, pdga_list)]
+
+    # Normalize PDGA entries that are multi-round events (e.g. suffix "→ 1. Kierros", "→ 2. Kierros").
+    # Keep only a single representative per multi-round event — prefer a base (non-round) entry,
+    # otherwise prefer the explicit "1. Kierros" entry, or the earliest date among rounds.
+    def _normalize_pdga_rounds(lst):
+        by_base = {}
+        others = []
+        for item in lst:
+            title = (item.get('name') or item.get('title') or '').strip()
+            if not title:
+                others.append(item)
+                continue
+            parts = [p.strip() for p in title.split('→')]
+            last = parts[-1].lower() if parts else ''
+            if 'kierros' in last:
+                base_key = ' → '.join(parts[:-1]).strip()
+                if not base_key:
+                    base_key = title
+                by_base.setdefault(base_key, []).append(item)
+            else:
+                # non-round entry — keep as-is, but mark base to prefer it
+                base_key = title
+                by_base.setdefault(base_key, []).append(item)
+
+        normalized = []
+        for base, items in by_base.items():
+            if len(items) == 1:
+                normalized.append(items[0])
+                continue
+            # If any item doesn't end with 'kierros' prefer that (base event)
+            non_round = [it for it in items if 'kierros' not in ((it.get('name') or it.get('title') or '').lower())]
+            if non_round:
+                normalized.append(non_round[0])
+                continue
+            # Prefer explicit '1. Kierros'
+            one_round = None
+            for it in items:
+                t = (it.get('name') or it.get('title') or '').lower()
+                if re.search(r'\b1\.?\s*kierros\b', t):
+                    one_round = it
+                    break
+            if one_round:
+                normalized.append(one_round)
+                continue
+            # Fallback: pick the item with the earliest date found in the title
+            def _extract_date_from_title(it):
+                t = (it.get('name') or it.get('title') or '')
+                m = re.search(r"(\d{1,2}\.\d{1,2}\.\d{2,4})", t)
+                if m:
+                    try:
+                        parts = m.group(1).split('.')
+                        d, mo, y = int(parts[0]), int(parts[1]), int(parts[2])
+                        if y < 100:
+                            y += 2000
+                        return datetime(y, mo, d)
+                    except Exception:
+                        return None
+                return None
+
+            items_with_dates = [(it, _extract_date_from_title(it)) for it in items]
+            items_with_dates = sorted(items_with_dates, key=lambda x: (x[1] is None, x[1] or datetime.max))
+            normalized.append(items_with_dates[0][0])
+
+        # Preserve original order as much as possible: build index map
+        seen = set()
+        final = []
+        for it in lst:
+            if it in normalized and id(it) not in seen:
+                final.append(it)
+                seen.add(id(it))
+        # append any normalized items that weren't preserved (rare)
+        for it in normalized:
+            if id(it) not in seen:
+                final.append(it)
+        return final
+
+    pdga_display_list = _normalize_pdga_rounds(pdga_display_list)
 
     # Prepare summaries
     pdga_count = len(pdga_display_list)
@@ -614,6 +691,7 @@ def run_once():
         known_keys = { _unique_key(x) for x in known_pdga }
         new_pdga = [c for c in pdga_display_list if _unique_key(c) not in known_keys]
 
+        pdga_detections = []
         if new_pdga:
             groups = {}
             for c in new_pdga:
@@ -657,6 +735,61 @@ def run_once():
             else:
                 pdga_msg = f"UUSIA PDGA-KILPAILUJA LISÄTTY ({len(new_pdga)})\n\n" + fmt_pdga_list(new_pdga)
                 post_to_discord(pdga_thread, token, pdga_msg)
+            # Try to detect Lakeus players in Top3 for any PDGA items that include a results URL
+            try:
+                for it in new_pdga:
+                    url = it.get('url') or ''
+                    name = it.get('name') or it.get('title') or ''
+                    if not url:
+                        continue
+                    try:
+                        u = None
+                        u = tulokset_mod._ensure_results_url(url)
+                        res = tulokset_mod._fetch_competition_results(u)
+                    except Exception:
+                        res = None
+                    if not res:
+                        continue
+                    try:
+                        hc = tulokset_mod._fetch_handicap_table(u)
+                    except Exception:
+                        hc = []
+                    # Build trimmed top3 result
+                    filtered_classes = []
+                    for cls in res.get('classes', []):
+                        rows = cls.get('rows') or []
+                        top_rows = []
+                        count_3 = 0
+                        for r in rows:
+                            pos = r.get('position')
+                            total = str(r.get('total') or '')
+                            try:
+                                total_num = int(total)
+                            except Exception:
+                                total_num = None
+                            if not isinstance(pos, int) or total_num == 0:
+                                continue
+                            if pos == 1 or pos == 2:
+                                top_rows.append(r)
+                            elif pos == 3:
+                                count_3 += 1
+                        if count_3 > 0:
+                            for r in rows:
+                                pos = r.get('position')
+                                total = str(r.get('total') or '')
+                                try:
+                                    total_num = int(total)
+                                except Exception:
+                                    total_num = None
+                                if isinstance(pos, int) and pos == 3 and total_num != 0 and r not in top_rows:
+                                    top_rows.append(r)
+                        filtered_classes.append({"class_name": cls.get("class_name"), "rows": top_rows})
+                    trimmed = {"event_name": name or res.get('event_name', ''), "classes": filtered_classes}
+                    dets = tulokset_mod._detect_club_memberships_for_event(trimmed, hc, name or res.get('event_name', ''))
+                    if dets:
+                        pdga_detections.extend(dets)
+            except Exception:
+                pass
         else:
             # Ei uusia PDGA-kisoja -> lähetetään silti päivittäinen yhteenveto
             print('Ei uusia PDGA-kisoja; lähetetään päivittäinen yhteenveto Discordiin')
@@ -678,6 +811,82 @@ def run_once():
                 'color': 16750848
             }
             post_embeds_to_discord(pdga_thread, token, [embed])
+            # Also try detection for listed PDGA items when no new_pdga (daily summary)
+            try:
+                for it in pdga_display_list[:40]:
+                    url = it.get('url') or ''
+                    name = it.get('name') or it.get('title') or ''
+                    if not url:
+                        continue
+                    try:
+                        u = None
+                        u = tulokset_mod._ensure_results_url(url)
+                        res = tulokset_mod._fetch_competition_results(u)
+                    except Exception:
+                        res = None
+                    if not res:
+                        continue
+                    try:
+                        hc = tulokset_mod._fetch_handicap_table(u)
+                    except Exception:
+                        hc = []
+                    filtered_classes = []
+                    for cls in res.get('classes', []):
+                        rows = cls.get('rows') or []
+                        top_rows = []
+                        count_3 = 0
+                        for r in rows:
+                            pos = r.get('position')
+                            total = str(r.get('total') or '')
+                            try:
+                                total_num = int(total)
+                            except Exception:
+                                total_num = None
+                            if not isinstance(pos, int) or total_num == 0:
+                                continue
+                            if pos == 1 or pos == 2:
+                                top_rows.append(r)
+                            elif pos == 3:
+                                count_3 += 1
+                        if count_3 > 0:
+                            for r in rows:
+                                pos = r.get('position')
+                                total = str(r.get('total') or '')
+                                try:
+                                    total_num = int(total)
+                                except Exception:
+                                    total_num = None
+                                if isinstance(pos, int) and pos == 3 and total_num != 0 and r not in top_rows:
+                                    top_rows.append(r)
+                        filtered_classes.append({"class_name": cls.get("class_name"), "rows": top_rows})
+                    trimmed = {"event_name": name or res.get('event_name', ''), "classes": filtered_classes}
+                    dets = tulokset_mod._detect_club_memberships_for_event(trimmed, hc, name or res.get('event_name', ''))
+                    if dets:
+                        pdga_detections.extend(dets)
+            except Exception:
+                pass
+
+        # If any PDGA detections found, persist and post aggregated message
+        try:
+            if pdga_detections:
+                msgs = []
+                for d in pdga_detections:
+                    try:
+                        tulokset_mod._increment_club_success(d.get('metrix_id') or '', d.get('name') or '', d.get('club') or '', context=f"PDGA {d.get('event_name')}")
+                    except Exception:
+                        pass
+                    pname = d.get('name') or ''
+                    pos = d.get('position')
+                    total = d.get('total') or ''
+                    cname = d.get('class_name') or ''
+                    club = d.get('club') or ''
+                    msgs.append(f"{pname} — sijoitus {pos} {total} luokassa {cname} ({club})")
+                try:
+                    post_to_discord(pdga_thread, token, "Onnittelut Lakeus Disc Golf -seuran pelaajille!\n" + "\n".join(msgs))
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         # Persist the current list as the known cache (overwrite)
         try:
@@ -797,6 +1006,145 @@ def run_once():
 
         new_weeklies = [w for w in weekly_display_list if _unique_key(w) not in known_weekly_keys]
         new_doubles = [d for d in doubles_list if _unique_key(d) not in known_double_keys]
+
+        # Filter out any new weeklies that already have results available on Metrix.
+        # This prevents posting items like "Uusia viikkokisoja lisätty" for events
+        # that already contain results.
+        try:
+            import komento_koodit.commands_tulokset as ct
+            import re as _re
+            filtered_weeklies = []
+            for w in new_weeklies:
+                url_raw = str(w.get('url') or w.get('metrix') or w.get('id') or '')
+                if not url_raw:
+                    filtered_weeklies.append(w)
+                    continue
+                try:
+                    url_base = ct._build_competition_url(url_raw) or url_raw
+                    url = ct._ensure_results_url(url_base)
+                except Exception:
+                    filtered_weeklies.append(w)
+                    continue
+
+                try:
+                    res = ct._fetch_competition_results(url)
+                except Exception:
+                    res = None
+
+                try:
+                    hc_table = ct._fetch_handicap_table(url)
+                except Exception:
+                    hc_table = []
+
+                has_valid_results = False
+                if res and res.get('classes'):
+                    for cls in res.get('classes', []):
+                        for r in (cls.get('rows') or []):
+                            pos = r.get('position')
+                            total_txt = str(r.get('total') or '').strip()
+                            m = _re.match(r"-?\d+", total_txt)
+                            total_num = int(m.group(0)) if m else None
+                            if isinstance(pos, int) and total_num not in (None, 0):
+                                has_valid_results = True
+                                break
+                        if has_valid_results:
+                            break
+
+                # If the HC table exists, consider that results are present as well.
+                if has_valid_results or (hc_table and len(hc_table) > 0):
+                    # skip adding this weekly to new_weeklies (results already present)
+                    continue
+                filtered_weeklies.append(w)
+
+            new_weeklies = filtered_weeklies
+        except Exception:
+            # On error, fall back to original new_weeklies list
+            pass
+
+        # Detect known weeklies that have newly available results and notify.
+        # Prepare results list and try to import the tulokset module for detection.
+        results_added = []
+        try:
+            ct = __import__('komento_koodit.commands_tulokset', fromlist=[''])[0] if False else __import__('komento_koodit.commands_tulokset', fromlist=[''])
+        except Exception:
+            ct = None
+
+        if ct is not None:
+            try:
+                for w in weekly_display_list:
+                    key = _unique_key(w)
+                    if key not in known_weekly_keys:
+                        continue
+                    url_raw = str(w.get('url') or w.get('metrix') or w.get('id') or '')
+                    if not url_raw:
+                        continue
+                    try:
+                        url_base = ct._build_competition_url(url_raw) or url_raw
+                        url = ct._ensure_results_url(url_base)
+                    except Exception:
+                        continue
+
+                    try:
+                        res = ct._fetch_competition_results(url)
+                    except Exception:
+                        res = None
+                    try:
+                        hc_table = ct._fetch_handicap_table(url)
+                    except Exception:
+                        hc_table = []
+
+                    has_valid_results = False
+                    if res and res.get('classes'):
+                        for cls in res.get('classes', []):
+                            for r in (cls.get('rows') or []):
+                                pos = r.get('position')
+                                total_txt = str(r.get('total') or '').strip()
+                                m = re.match(r"-?\d+", total_txt)
+                                total_num = int(m.group(0)) if m else None
+                                if isinstance(pos, int) and total_num not in (None, 0):
+                                    has_valid_results = True
+                                    break
+                            if has_valid_results:
+                                break
+
+                    if has_valid_results or (hc_table and len(hc_table) > 0):
+                        # Add to notify list
+                        results_added.append((w, res, hc_table))
+            except Exception:
+                results_added = []
+
+            if results_added:
+                lines = []
+                for w, res, hc_table in results_added:
+                    title_text = _shorten_series_title(w.get('title') or w.get('name') or '')
+                    url = w.get('url') or ''
+                    if url:
+                        lines.append(f"• [{title_text}]({url})")
+                    else:
+                        lines.append(f"• {title_text}")
+                    # Include Top3 snippet if available
+                    try:
+                        if res:
+                            top = ct._format_top3_lines_for_result(res, hc_present=bool(hc_table))
+                            if top:
+                                for t in top:
+                                    lines.append(f"  {t}")
+                        elif hc_table:
+                            top = ct._format_hc_top3_lines(hc_table)
+                            for t in top:
+                                lines.append(f"  {t}")
+                    except Exception:
+                        continue
+
+                desc = "\n".join(lines)
+                embed = {'title': f'Uusia tuloksia saatavilla ({len(results_added)})', 'description': desc, 'color': 5763714}
+                try:
+                    post_embeds_to_discord(weekly_thread, token, [embed])
+                except Exception:
+                    try:
+                        post_to_discord(weekly_thread, token, f"Uusia tuloksia saatavilla:\n\n{desc}")
+                    except Exception:
+                        pass
 
         if new_weeklies or new_doubles:
             embed = build_weekly_embed(new_weeklies, new_doubles)
@@ -1150,7 +1498,7 @@ def main():
     parser.add_argument('--once', action='store_true', help='Run once and exit')
     parser.add_argument('--daemon', action='store_true', help='Run continuously')
     parser.add_argument('--presence', action='store_true', help='Start Discord gateway client to show bot as online (requires discord.py and valid token)')
-    parser.add_argument('--interval-minutes', type=float, default=float(os.environ.get('METRIX_INTERVAL_MINUTES', '1')),
+    parser.add_argument('--interval-minutes', type=float, default=float(os.environ.get('METRIX_INTERVAL_MINUTES', '120')),
                         help='Interval between runs when --daemon (minutes)')
     parser.add_argument('--times', type=int, default=1, help='When used with --once, run the orchestrator this many times in sequence')
     args = parser.parse_args()
@@ -1214,7 +1562,8 @@ def main():
             print('Failed to start registration worker:', e)
         # start capacity scan worker thread
         try:
-            cap_interval = int(os.environ.get('CAPACITY_CHECK_INTERVAL', str(CHECK_INTERVAL)))
+            # Default to 1800 seconds (30 minutes) for capacity/paikat checks
+            cap_interval = int(os.environ.get('CAPACITY_CHECK_INTERVAL', '1800'))
             start_capacity_worker(BASE_DIR, cap_interval)
             # Tallenna nykyinen arvo, jotta !admin status voi raportoida sen.
             global CURRENT_CAPACITY_INTERVAL
@@ -1284,7 +1633,7 @@ def main():
             mins = max(0.1, args.interval_minutes)
             secs = mins * 60.0
             next_check = datetime.now() + timedelta(minutes=mins)
-            print(f"Seuraava daily-digest -tarkistus klo {next_check:%H:%M} (noin {mins:.1f} min kuluttua)")
+            print(f"Seuraava tarkistus klo {next_check:%H:%M}")
             time.sleep(secs)
 
 
