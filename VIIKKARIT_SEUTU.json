@@ -50,6 +50,26 @@
     "area": "Keski-Suomi"
   },
   {
+    "id": "3524228",
+    "title": "(Kilpailun nimi)",
+    "tier": "",
+    "date": "01/03/26 17:57",
+    "location": "Muuramenharju kesäkilpailurata ilman mandoja",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3524228",
+    "area": "Keski-Suomi"
+  },
+  {
+    "id": "3524229",
+    "title": "(Kilpailun nimi)",
+    "tier": "",
+    "date": "01/03/26 17:57",
+    "location": "Muuramenharju kesäkilpailurata ilman mandoja",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3524229",
+    "area": "Keski-Suomi"
+  },
+  {
     "id": "3523276",
     "title": "JyLin talvikisat 2025-2026 → 1. Kierros, Viherlandia",
     "tier": "Weekly",
@@ -64,7 +84,7 @@
     "title": "Jämsän Frisbeegolf - Talvicup 2026",
     "tier": "Weekly",
     "date": "01/04/26 - 03/22/26",
-    "location": "Players: 8",
+    "location": "Players: 9",
     "kind": "VIIKKOKISA",
     "url": "https://discgolfmetrix.com/3521723",
     "area": "Keski-Suomi"
@@ -104,9 +124,19 @@
     "title": "JyLin talvikisat 2025-2026",
     "tier": "",
     "date": "01/04/26 - 03/22/26",
-    "location": "Players: 15",
+    "location": "Players: 18",
     "kind": "VIIKKOKISA",
     "url": "https://discgolfmetrix.com/3523266",
+    "area": "Keski-Suomi"
+  },
+  {
+    "id": "3524244",
+    "title": "LIEVESTUORE KLO.10 [kello:kymmeneltä siis]",
+    "tier": "Weekly",
+    "date": "01/06/26 10:00",
+    "location": "LIEVESTUOREEN Talvi&Ledi (2x11)",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3524244",
     "area": "Keski-Suomi"
   },
   {

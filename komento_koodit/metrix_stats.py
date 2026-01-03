@@ -577,14 +577,16 @@ def fetch_player_stats(metrix_id: str) -> Optional[PlayerStats]:
     if player_resp.status_code != 200 or not player_resp.text:
         return None
 
-    # Debug: tallenna pelaajasivun HTML, jotta voidaan tutkia parsintaa myöhemmin.
-    try:
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__) or "", ".."))
-        debug_path_player = os.path.join(base_dir, f"Metrix_player_{metrix_id}_debug.html")
-        with open(debug_path_player, "w", encoding="utf-8") as f_dbg:
-            f_dbg.write(player_resp.text)
-    except Exception:
-        pass
+    # Debug HTML voidaan haluttaessa ottaa käyttöön asettamalla
+    # METRIX_DEBUG_HTML=1 ympäristömuuttujaan.
+    if os.environ.get("METRIX_DEBUG_HTML", "").strip():
+        try:
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__) or "", ".."))
+            debug_path_player = os.path.join(base_dir, f"Metrix_player_{metrix_id}_debug.html")
+            with open(debug_path_player, "w", encoding="utf-8") as f_dbg:
+                f_dbg.write(player_resp.text)
+        except Exception:
+            pass
 
     stats = _parse_player_stats(player_resp.text, metrix_id)
 
@@ -602,14 +604,16 @@ def fetch_player_stats(metrix_id: str) -> Optional[PlayerStats]:
             front_resp = None
 
         if front_resp is not None and front_resp.status_code == 200 and front_resp.text:
-            # Debug: tallenna etusivun HTML erilliseen tiedostoon
-            try:
-                base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__) or "", ".."))
-                debug_path_front = os.path.join(base_dir, "Metrix_front_debug.html")
-                with open(debug_path_front, "w", encoding="utf-8") as f_dbg:
-                    f_dbg.write(front_resp.text)
-            except Exception:
-                pass
+            # Debug: tallenna etusivun HTML erilliseen tiedostoon vain, jos
+            # METRIX_DEBUG_HTML on asetettu.
+            if os.environ.get("METRIX_DEBUG_HTML", "").strip():
+                try:
+                    base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__) or "", ".."))
+                    debug_path_front = os.path.join(base_dir, "Metrix_front_debug.html")
+                    with open(debug_path_front, "w", encoding="utf-8") as f_dbg:
+                        f_dbg.write(front_resp.text)
+                except Exception:
+                    pass
 
             front_stats = _parse_player_stats(front_resp.text, metrix_id)
 

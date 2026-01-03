@@ -150,11 +150,11 @@
     "name": "NBDG Winter Tour™ Powered by Valostore → #7 Puolarmaari",
     "url": "https://discgolfmetrix.com/3512043",
     "capacity_result": {
-      "registered": 82,
+      "registered": 83,
       "limit": 80,
       "remaining": 0,
       "note": "metrix-reg-table-waitlist",
-      "queued": 2,
+      "queued": 3,
       "metrix_header_empty": false
     }
   },
@@ -175,9 +175,9 @@
     "name": "Luolavuoren Talvi",
     "url": "https://discgolfmetrix.com/3520307",
     "capacity_result": {
-      "registered": 22,
+      "registered": 24,
       "limit": 72,
-      "remaining": 50,
+      "remaining": 48,
       "note": "metrix-reg-table",
       "metrix_header_empty": false
     }
@@ -199,9 +199,9 @@
     "name": "NBDG Winter Tour™ Powered by Valostore → #8 Orimattila",
     "url": "https://discgolfmetrix.com/3512046",
     "capacity_result": {
-      "registered": 32,
+      "registered": 33,
       "limit": 84,
-      "remaining": 52,
+      "remaining": 51,
       "note": "metrix-reg-table",
       "metrix_header_empty": false
     }
@@ -259,9 +259,9 @@
     "name": "Skogby kevätrieha 2026",
     "url": "https://discgolfmetrix.com/3516653",
     "capacity_result": {
-      "registered": 28,
+      "registered": 31,
       "limit": 100,
-      "remaining": 72,
+      "remaining": 69,
       "note": "metrix-reg-table",
       "metrix_header_empty": false
     }

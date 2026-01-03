@@ -37,8 +37,14 @@ def _general_help_description() -> str:
         "• !rek\n"
         "• !etsi\n"
         "• !paikat\n"
-        "• !viikkarit (ep | pohj | kp | ks | pirk | sata | mk | suomi)\n"
-            "• !viikkarit (ep | pohj | kp | ks | pirk | sata | mk | suomi)\n"
+        "• !viikkarit ep | pohj | kp | ks | pirk | sata | mk | suomi\n\n"
+
+        "📊 Tulospalvelu\n"
+        "Näytä viikkarikisojen ja Metrix-kilpailujen tuloksia Top3-koosteina.\n"
+        "Komennot:\n"
+        "• !tulokset [ep|pohj|kp|ks|pirk|sata|mk|suomi]\n"
+        "• !tulokset kisa <Metrix-linkki tai ID>\n"
+
     )
 
 
@@ -130,6 +136,7 @@ def _kilpailut_help_description() -> str:
         "!etsi <hakusana> — Etsi kilpailuja nimen, alueen tai radan mukaan.\n"
         "!paikat — Näytä kilpailut, joissa on vähän paikkoja jäljellä.\n"
         "!viikkarit [ep|pohj|kp|ks|pirk|sata|mk|suomi] — Tämän viikon viikkokisat (maakunnittain, lähimaakunnissa tai koko Suomi).\n\n"
+        "Tulospalvelu-komennot on kuvattu erikseen: !ohje tulospalvelu.\n\n"
         "Lyhenteet: ep = Etelä-Pohjanmaa, pohj = Pohjanmaa, kp = Keski-Pohjanmaa, ks = Keski-Suomi, pirk = Pirkanmaa, sata = Satakunta, mk = lähimaakunnat (EP + naapurit).\n\n"
         "Komennot:\n!rek\n!etsi\n!paikat\n!viikkarit\n"
     )
@@ -145,6 +152,17 @@ def _pelit_help_description() -> str:
         "📊 Tilastot: Leaderboard ja parhaat tulokset\n\n"
         "💡 Komennot: Katso !ohje pelit lisätiedoille\n\n"
         "Komennot:\n!peli\n!top20\n!top10\n!kiekkovisa\n!admin\n"
+    )
+
+
+def _tulospalvelu_help_description() -> str:
+    return (
+        "Tulospalvelu\n"
+        "📊 Viikkareiden tulokset\n\n"
+        "Näytä viikkareiden koontitulokset ja yksittäisten Metrix-kisojen Top3-tulokset luokittain.\n\n"
+        "Viikkarikisojen tulokset (viikon kooste):\n"
+        "!tulokset [ep|pohj|kp|ks|pirk|sata|mk|suomi] — Tämän viikon viikkarikisojen Top3-tulokset alueittain.\n\n"
+        "Lyhenteet: ep = Etelä-Pohjanmaa, pohj = Pohjanmaa, kp = Keski-Pohjanmaa, ks = Keski-Suomi, pirk = Pirkanmaa, sata = Satakunta, mk = lähimaakunnat (EP + naapurit), suomi = koko Suomi.\n"
     )
 
 
@@ -169,5 +187,8 @@ def get_help_message(topic: Optional[str] = None) -> Dict[str, str]:
 
     if normalized in {"kisa", "kisat", "kilpailu", "kilpailut", "rek", "spots", "paikat", "etsi", "viikkari", "viikkarit"}:
         return {"title": BASE_TITLE, "description": _kilpailut_help_description()}
+
+    if normalized in {"tulokset", "tulospalvelu"}:
+        return {"title": BASE_TITLE, "description": _tulospalvelu_help_description()}
 
     return {"title": BASE_TITLE, "description": _general_help_description()}

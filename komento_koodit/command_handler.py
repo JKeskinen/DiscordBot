@@ -35,6 +35,10 @@ try:
 except Exception:
     viikkarit_commands = None
 try:
+    from . import commands_tulokset as tulokset_commands
+except Exception:
+    tulokset_commands = None
+try:
     from . import commands_disc as disc_commands
 except Exception:
     disc_commands = None
@@ -179,6 +183,19 @@ class CommandListenerThread(threading.Thread):
                         await viikkarit_commands.handle_viikkarit(message, parts)
                     else:
                         await message.channel.send('Virhe: viikkarit-komentoa ei voi suorittaa (moduuli puuttuu).')
+                    return
+
+                # --- !tulokset: kilpailutulokset (esim. viikkari Top3) ---
+                if command == 'tulokset':
+                    # Kirjoita pyyntö terminaaliin
+                    try:
+                        print(f"[LakeusBotti] !tulokset-komento: {' '.join(parts)}")
+                    except Exception:
+                        pass
+                    if tulokset_commands is not None and hasattr(tulokset_commands, 'handle_tulokset'):
+                        await tulokset_commands.handle_tulokset(message, parts)
+                    else:
+                        await message.channel.send('Virhe: tulokset-komentoa ei voi suorittaa (moduuli puuttuu).')
                     return
 
                 # --- !rek (existing behaviour, now delegated) ---
