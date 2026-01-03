@@ -1,4 +1,4 @@
-from hyvat_koodit import check_capacity
+from komento_koodit import check_capacity
 import json
 
 # single-run for event under inspection

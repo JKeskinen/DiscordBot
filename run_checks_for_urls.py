@@ -1,4 +1,4 @@
-from hyvat_koodit import check_capacity
+from komento_koodit import check_capacity
 import json
 urls = [
     'https://discgolfmetrix.com/3519179',

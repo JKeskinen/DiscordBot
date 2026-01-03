@@ -32,7 +32,7 @@ def _sanitize_capacity(res: dict) -> dict:
                 queued = int(-rem)
             except Exception:
                 queued = None
-            logger.info('Parsed negative remaining (%s) from source %s; marking as waitlist (queued=%s)', rem, res.get('note'), queued)
+            logger.info('Negatiivinen j\u00e4ljell\u00e4-luku (%s) l\u00e4hteest\u00e4 %s; tulkitaan jonotuslistaksi (jonossa=%s)', rem, res.get('note'), queued)
             out = {
                 'registered': res.get('registered'),
                 'limit': res.get('limit'),

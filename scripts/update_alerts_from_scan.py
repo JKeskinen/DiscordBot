@@ -6,7 +6,10 @@ from datetime import datetime
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 SCAN = os.path.join(BASE, 'CAPACITY_SCAN_RESULTS.json')
 ALERTS = os.path.join(BASE, 'CAPACITY_ALERTS.json')
-THRESHOLD = int(os.environ.get('CAPACITY_ALERT_THRESHOLD', '20'))
+
+# Prosenttipohjaiset hälytyskynnykset: kun paikkoja on jäljellä
+# enintään 50 %, 25 %, 10 % tai 5 % kokonaiskapasiteetista.
+THRESHOLDS_PERCENT = (50, 25, 10, 5)
 
 
 def parse_date_from_item(item):
@@ -47,7 +50,7 @@ def parse_date_from_item(item):
 
 def main():
     if not os.path.exists(SCAN):
-        print('No scan results at', SCAN)
+        print('Ei kapasiteettiskannauksen tuloksia tiedostossa', SCAN)
         return
     with open(SCAN, 'r', encoding='utf-8') as f:
         data = json.load(f)
@@ -67,11 +70,10 @@ def main():
         # determine if this event is in the past (archive)
         dt = parse_date_from_item(item)
         is_past = False
-        if dt:
-            if dt.date() < today.date():
-                is_past = True
+        if dt is not None and dt.date() < today.date():
+            is_past = True
 
-        if is_past:
+        if is_past and dt is not None:
             year = dt.year
             hist_name = f'HISTORY_{year}.json'
             hist_path = os.path.join(BASE, hist_name)
@@ -82,19 +84,40 @@ def main():
         # keep item in scan results
         remaining_scan.append(item)
 
-        # only raise alerts when remaining is known, limit exists,
-        # and remaining is between 1 and the configured threshold
+        # only raise alerts when remaining and limit are known and there is
+        # at least one paikka jäljellä.
         if isinstance(rem, int) and lim is not None and isinstance(lim, int):
-            if rem > 0 and rem <= THRESHOLD and not skip_due_to_queue:
-                alerts.append({
-                    'id': item.get('id'),
-                    'title': item.get('name') or item.get('title'),
-                    'url': item.get('url'),
-                    'registered': cap.get('registered'),
-                    'limit': cap.get('limit'),
-                    'remaining': rem,
-                    'note': cap.get('note')
-                })
+            if rem > 0 and not skip_due_to_queue and lim > 0:
+                # Laske montako prosenttia paikkoja on jäljellä.
+                try:
+                    percent_left = (rem / float(lim)) * 100.0
+                except Exception:
+                    percent_left = None
+
+                if percent_left is not None:
+                    # Määritä "tasokynnys": 50 %, 25 %, 10 % tai 5 %.
+                    level = None
+                    if percent_left <= 5:
+                        level = 5
+                    elif percent_left <= 10:
+                        level = 10
+                    elif percent_left <= 25:
+                        level = 25
+                    elif percent_left <= 50:
+                        level = 50
+
+                    if level is not None:
+                        alerts.append({
+                            'id': item.get('id'),
+                            'title': item.get('name') or item.get('title'),
+                            'url': item.get('url'),
+                            'registered': cap.get('registered'),
+                            'limit': cap.get('limit'),
+                            'remaining': rem,
+                            'remaining_percent': round(percent_left, 1),
+                            'level': level,
+                            'note': cap.get('note')
+                        })
         else:
             # previously we alerted on 'no visible limit'; skip these now
             pass
@@ -102,12 +125,12 @@ def main():
     # write alerts
     with open(ALERTS, 'w', encoding='utf-8') as f:
         json.dump(alerts, f, ensure_ascii=False, indent=2)
-    print('Wrote', len(alerts), 'alerts to', ALERTS)
+    print('Kirjoitettiin', len(alerts), 'kapasiteetti-ilmoitusta tiedostoon', ALERTS)
 
     # write updated scan results (excluding archived)
     with open(SCAN, 'w', encoding='utf-8') as f:
         json.dump(remaining_scan, f, ensure_ascii=False, indent=2)
-    print('Updated scan results; remaining entries:', len(remaining_scan))
+    print('Päivitettiin kapasiteettiskannauksen tulokset; rivejä jäljellä:', len(remaining_scan))
 
     # append archived items to per-year history files
     for path, items in archived.items():
@@ -121,7 +144,7 @@ def main():
         existing.extend(items)
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(existing, f, ensure_ascii=False, indent=2)
-        print('Archived', len(items), 'items to', path)
+        print('Arkistoitiin', len(items), 'tapahtumaa tiedostoon', path)
 
 
 if __name__ == '__main__':

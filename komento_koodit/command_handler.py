@@ -31,9 +31,17 @@ try:
 except Exception:
     metrix_commands = None
 try:
+    from . import commands_viikkarit as viikkarit_commands
+except Exception:
+    viikkarit_commands = None
+try:
     from . import commands_disc as disc_commands
 except Exception:
     disc_commands = None
+try:
+    from . import commands_admin as admin_commands
+except Exception:
+    admin_commands = None
 from typing import Any, cast
 
 
@@ -141,6 +149,14 @@ class CommandListenerThread(threading.Thread):
                     await message.channel.send('Botti resetoitu (väliaikaiset muistirakenteet tyhjennetty).')
                     return
 
+                # --- !admin: ylläpitoasetukset ---
+                if command == 'admin':
+                    if admin_commands is not None and hasattr(admin_commands, 'handle_admin'):
+                        await admin_commands.handle_admin(message, parts)
+                    else:
+                        await message.channel.send('Virhe: admin-komentoa ei voi suorittaa (moduuli puuttuu).')
+                    return
+
                 # --- !pdga: player lookup by PDGA number ---
                 if command == 'pdga':
                     if pdga_commands is not None and hasattr(pdga_commands, 'handle_pdga'):
@@ -155,6 +171,14 @@ class CommandListenerThread(threading.Thread):
                         await metrix_commands.handle_metrix(message, parts)
                     else:
                         await message.channel.send('Virhe: metrix-komentoa ei voi suorittaa (moduuli puuttuu).')
+                    return
+
+                # --- !viikkarit: tämän viikon viikkokisat (VIIKKOKISA.json) ---
+                if command == 'viikkarit':
+                    if viikkarit_commands is not None and hasattr(viikkarit_commands, 'handle_viikkarit'):
+                        await viikkarit_commands.handle_viikkarit(message, parts)
+                    else:
+                        await message.channel.send('Virhe: viikkarit-komentoa ei voi suorittaa (moduuli puuttuu).')
                     return
 
                 # --- !rek (existing behaviour, now delegated) ---

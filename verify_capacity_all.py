@@ -5,7 +5,7 @@ and saving rendered HTML for any mismatches.
 import json
 import os
 import re
-from hyvat_koodit.check_capacity import check_competition_capacity
+from komento_koodit.check_capacity import check_competition_capacity
 
 OUT = 'CAPACITY_VERIFICATION.json'
 ALERTS = 'CAPACITY_ALERTS.json'

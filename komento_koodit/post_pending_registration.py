@@ -28,9 +28,15 @@ KNOWN_WEEKLY = os.path.join(BASE_DIR, 'known_weekly_competitions.json')
 
 _load_dotenv()
 TOKEN = os.environ.get('DISCORD_TOKEN')
+
+# Testikanava, johon kaikki rekisteröinti-ilmoitukset ohjataan oletuksena.
+TEST_THREAD = os.environ.get('DISCORD_TEST_THREAD') or os.environ.get('DISCORD_TEST_CHANNEL_ID') or '1456702993377267905'
+
 # Threads: PDGA and WEEKLY (viikkarit+doubles)
-PDGA_THREAD = os.environ.get('DISCORD_PDGA_THREAD') or os.environ.get('DISCORD_THREAD_ID') or '1455713091970142270'
-WEEKLY_THREAD = os.environ.get('DISCORD_WEEKLY_THREAD') or os.environ.get('DISCORD_WEEKLY_THREAD_ID') or '1455713153127026889'
+# Ympäristömuuttujilla (DISCORD_PDGA_THREAD / DISCORD_WEEKLY_THREAD) voi myöhemmin ohjata
+# tuotantokanaville, mutta ilman niitä kaikki menee testikanavaan.
+PDGA_THREAD = os.environ.get('DISCORD_PDGA_THREAD') or os.environ.get('DISCORD_THREAD_ID') or TEST_THREAD
+WEEKLY_THREAD = os.environ.get('DISCORD_WEEKLY_THREAD') or os.environ.get('DISCORD_WEEKLY_THREAD_ID') or TEST_THREAD
 
 HEADERS = {'Authorization': f'Bot {TOKEN}', 'Content-Type': 'application/json'}
 

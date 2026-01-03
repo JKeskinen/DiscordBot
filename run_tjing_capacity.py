@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import os
 import json
-from hyvat_koodit.check_capacity import scan_pdga_for_tjing, fetch_tjing_capacity
+from komento_koodit.check_capacity import scan_pdga_for_tjing, fetch_tjing_capacity
 
 BASE = os.path.abspath(os.path.dirname(__file__))
 TJ_REG = os.path.join(BASE, 'TJING_REGISTRATIONS.json')

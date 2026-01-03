@@ -27,7 +27,7 @@ for c in res[:200]:
     elif reg is None and lim is not None:
         disp = f'?/{lim} ({rem if rem is not None else "?"} left)'
     else:
-        disp = f'järjellä {rem if rem is not None else "?"} paikkaa'
+        disp = f'jäljellä {rem if rem is not None else "?"} paikkaa'
     if url:
         lines.append(f'• [{name}]({url}) — {disp}')
     else:

@@ -119,7 +119,7 @@ async def handle_spots(message: Any, parts: Any) -> None:
             elif reg is None and lim is not None:
                 disp = f"?/{lim}"
             else:
-                disp = f'järjellä {rem if rem is not None else "?"} paikkaa'
+                disp = f'jäljellä {rem if rem is not None else "?"} paikkaa'
 
             if url:
                 lines.append(f"• [{name}]({url}) — {disp}")
@@ -170,7 +170,7 @@ async def handle_spots(message: Any, parts: Any) -> None:
             elif reg is None and lim is not None:
                 disp = f"?/{lim}"
             else:
-                disp = f'järjellä {rem if rem is not None else "?"} paikkaa'
+                disp = f'jäljellä {rem if rem is not None else "?"} paikkaa'
             lines.append(f"• {name} — {disp} — {url}")
 
         await _send_spots_lines(channel, lines)

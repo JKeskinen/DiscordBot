@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 import requests
 from bs4 import BeautifulSoup as BS
-from hyvat_koodit import check_capacity
+from komento_koodit import check_capacity
 
 URL = sys.argv[1] if len(sys.argv) > 1 else 'https://discgolfmetrix.com/3512047'
 OUT_DIR = Path('.') / 'debug_tjing'

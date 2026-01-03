@@ -3,7 +3,7 @@ import time
 import requests
 from bs4 import BeautifulSoup as BS
 
-from hyvat_koodit import check_capacity as cc
+from komento_koodit import check_capacity as cc
 
 
 def main():

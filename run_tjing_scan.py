@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import json
-from hyvat_koodit.check_capacity import scan_pdga_for_tjing
+from komento_koodit.check_capacity import scan_pdga_for_tjing
 
 if __name__ == '__main__':
     res = scan_pdga_for_tjing()

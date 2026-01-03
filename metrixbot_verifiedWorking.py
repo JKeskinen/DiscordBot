@@ -6,6 +6,7 @@ import requests
 import logging
 import re
 import csv
+from datetime import datetime, date, timedelta
 from typing import Optional
 
 # Module base dir
@@ -33,10 +34,13 @@ except Exception:
 DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
 
 # Primary channel and thread IDs (fall back to env overrides)
-DISCORD_CHANNEL_ID = int(os.environ.get("DISCORD_CHANNEL_ID", "1241453177979797584"))
-DISCORD_THREAD_ID = int(os.environ.get("DISCORD_THREAD_ID", "1241493648080764988"))
-DISCORD_WEEKLY_THREAD_ID = int(os.environ.get("DISCORD_WEEKLY_THREAD_ID", "1455647584583417889"))
-DISCORD_DISCS_THREAD_ID = os.environ.get("DISCORD_DISCS_THREAD", "1241464044783669388")
+# Testikanava, johon kaikki uudet ilmoitukset ohjataan oletuksena:
+TEST_CHANNEL_ID = os.environ.get("DISCORD_TEST_CHANNEL_ID", "1456702993377267905")
+
+DISCORD_CHANNEL_ID = int(os.environ.get("DISCORD_CHANNEL_ID", TEST_CHANNEL_ID))
+DISCORD_THREAD_ID = int(os.environ.get("DISCORD_THREAD_ID", TEST_CHANNEL_ID))
+DISCORD_WEEKLY_THREAD_ID = int(os.environ.get("DISCORD_WEEKLY_THREAD_ID", TEST_CHANNEL_ID))
+DISCORD_DISCS_THREAD_ID = os.environ.get("DISCORD_DISCS_THREAD", TEST_CHANNEL_ID)
 
 WEEKLY_JSON = os.environ.get("WEEKLY_JSON", "weekly_pair.json")
 WEEKLY_LOCATION = os.environ.get("WEEKLY_LOCATION", "Etelä-Pohjanmaa").strip().lower()
@@ -48,6 +52,18 @@ METRIX_URL = os.environ.get("METRIX_URL", "https://discgolfmetrix.com/?u=competi
 AUTO_LIST_INTERVAL = int(os.environ.get('AUTO_LIST_INTERVAL', '86400'))
 CHECK_INTERVAL = int(os.environ.get('CHECK_INTERVAL', '600'))
 CHECK_REGISTRATION_INTERVAL = int(os.environ.get('CHECK_REGISTRATION_INTERVAL', '3600'))
+CURRENT_CAPACITY_INTERVAL = CHECK_INTERVAL
+
+# Päivittäisen digestin viimeisin ajopäivä (päivitetään daemon-loopissa).
+# Tämä tuodaan globaaliksi, jotta admin-komennot voivat tarvittaessa
+# nollata arvon ja pakottaa digestin ajettavaksi saman päivän aikana
+# uuteen kellonaikaan.
+LAST_DIGEST_DATE: Optional[date] = None
+
+# Päivittäisen kilpailudigestin (PDGA + viikkarit + rekisteröinnit) kellonaika.
+# Voit muuttaa näitä esim. .env-tiedostossa: DAILY_DIGEST_HOUR=6, DAILY_DIGEST_MINUTE=0
+DAILY_DIGEST_HOUR = int(os.environ.get('DAILY_DIGEST_HOUR', '11'))  # 0-23
+DAILY_DIGEST_MINUTE = int(os.environ.get('DAILY_DIGEST_MINUTE', '05'))  # 0-59
 
 CACHE_FILE = os.environ.get('CACHE_FILE', 'known_pdga_competitions.json')
 REG_CHECK_FILE = os.environ.get('REG_CHECK_FILE', 'pending_registration.json')
@@ -252,11 +268,13 @@ def post_startup_capacity_alerts(base_dir: str, token: Optional[str]):
 
 def run_once():
     _load_dotenv()
-    # Import modules from hyvat_koodit
-    import hyvat_koodit.search_pdga_sfl as pdga_mod
+    # Import modules from komento_koodit (entinen hyvat_koodit)
+    import komento_koodit.search_pdga_sfl as pdga_mod
     # Importing weekly module executes it and writes VIIKKOKISA.json
-    import hyvat_koodit.search_weekly_fast as weekly_mod
-    import hyvat_koodit.search_pari_EP2025 as pari_mod
+    import komento_koodit.search_weekly_fast as weekly_mod
+    # Seutu-viikkarit (EP + naapurimaakunnat) kirjoitetaan erilliseen JSONiin
+    import komento_koodit.search_weekly_areas as weekly_areas_mod
+    import komento_koodit.search_pari_EP2025 as pari_mod
 
     base_dir = os.path.abspath(os.path.dirname(__file__))
 
@@ -274,6 +292,12 @@ def run_once():
     if not os.path.exists(out_weekly):
         # nothing else to call; inform user
         print('VIIKKOKISA.json not found after import of weekly script')
+
+    # Seutu-viikkarit: ajetaan erillinen hakuskripti, joka kirjoittaa VIIKKARIT_SEUTU.json
+    try:
+        weekly_areas_mod.main()
+    except Exception as e:
+        print('Seutu-viikkareiden haku (VIIKKARIT_SEUTU) epäonnistui:', e)
 
     # Doubles: call function and save DOUBLES.json
     try:
@@ -375,11 +399,12 @@ def run_once():
         sep = '\n' * DISCORD_LINE_SPACING
         return sep.join(lines) if lines else '(none)'
 
-    print('Run summary:\n' + f"PDGA: {pdga_count}, VIIKKOKISA: {weekly_count}, DOUBLES: {doubles_count}")
+    print('Yhteenveto ajosta:\n' + f"PDGA: {pdga_count}, VIIKKOKISA: {weekly_count}, DOUBLES: {doubles_count}")
 
     token = os.environ.get('DISCORD_TOKEN')
-    pdga_thread = os.environ.get('DISCORD_PDGA_THREAD', '1455713091970142270')
-    weekly_thread = os.environ.get('DISCORD_WEEKLY_THREAD', '1455713153127026889')
+    # PDGA- ja viikkarikatsaukset: oletuksena testikanava, ellei ympäristömuuttujilla ohiteta
+    pdga_thread = os.environ.get('DISCORD_PDGA_THREAD', TEST_CHANNEL_ID)
+    weekly_thread = os.environ.get('DISCORD_WEEKLY_THREAD', TEST_CHANNEL_ID)
 
     if not token:
         print('DISCORD_TOKEN not set; skipping Discord posts')
@@ -458,7 +483,7 @@ def run_once():
                 pdga_msg = f"UUSIA PDGA-KILPAILUJA LISÄTTY ({len(new_pdga)})\n\n" + fmt_pdga_list(new_pdga)
                 post_to_discord(pdga_thread, token, pdga_msg)
         else:
-            print('No new PDGA competitions found; skipping PDGA post')
+            print('Ei uusia PDGA-kisoja; ei lähetetä viestiä Discordiin')
 
         # Persist the current list as the known cache (overwrite)
         try:
@@ -584,7 +609,7 @@ def run_once():
                 wd_msg = f"VIIKKARIT ({len(new_weeklies)}) ja PARIKISAT ({len(new_doubles)})\n\n" + fmt_weekly_and_doubles(new_weeklies, new_doubles)
                 post_to_discord(weekly_thread, token, wd_msg)
         else:
-            print('No new weekly or doubles competitions found; skipping weekly post')
+            print('Ei uusia viikkokisoja tai parikisoja; ei lähetetä viestiä Discordiin')
 
         # Persist known weeklies/doubles (overwrite with current lists)
         try:
@@ -607,12 +632,12 @@ def run_once():
 def _run_registration_check_once(base_dir, out_path=None):
     """Run the registration checker once: inspect PDGA + weekly lists, write pending file,
     and call posting helpers to post new/open registrations.
-    This mirrors hyvat_koodit.check_registration + post_pending_registration logic but
+    This mirrors komento_koodit.check_registration + post_pending_registration logic but
     keeps it inside this process to avoid subprocesses.
     """
     try:
-        import hyvat_koodit.check_registration as reg_mod
-        import hyvat_koodit.post_pending_registration as post_mod
+        import komento_koodit.check_registration as reg_mod
+        import komento_koodit.post_pending_registration as post_mod
     except Exception as e:
         print('Failed to import registration modules:', e)
         return
@@ -926,13 +951,13 @@ def main():
             print('DISCORD_TOKEN not set; skipping presence and command listener')
         else:
             try:
-                from hyvat_koodit.discord_presence import start_presence
+                from komento_koodit.discord_presence import start_presence
                 # run_forever True for daemon mode; if --once, run_forever=False so it disconnects
                 # Default status text now matches the LakeusBotti branding;
                 # can be overridden with DISCORD_STATUS.
                 presence_thread = start_presence(token, status_message=os.environ.get('DISCORD_STATUS', 'LakeusBotti'), run_forever=not args.once)
                 try:
-                    from hyvat_koodit.command_handler import start_command_listener
+                    from komento_koodit.command_handler import start_command_listener
                     start_command_listener(token, prefix='!', run_forever=not args.once)
                 except Exception as e:
                     print('Failed to start command listener:', e)
@@ -953,7 +978,8 @@ def main():
         return
 
     if args.daemon:
-        print('Starting metrixbot daemon; first run now')
+        print('Starting metrixbot daemon; daily digest scheduled at '
+              f"{DAILY_DIGEST_HOUR:02d}:{DAILY_DIGEST_MINUTE:02d}")
         # start registration worker thread
         try:
             start_registration_worker(BASE_DIR, CHECK_REGISTRATION_INTERVAL)
@@ -964,6 +990,9 @@ def main():
         try:
             cap_interval = int(os.environ.get('CAPACITY_CHECK_INTERVAL', str(CHECK_INTERVAL)))
             start_capacity_worker(BASE_DIR, cap_interval)
+            # Tallenna nykyinen arvo, jotta !admin status voi raportoida sen.
+            global CURRENT_CAPACITY_INTERVAL
+            CURRENT_CAPACITY_INTERVAL = cap_interval
             print('Capacity worker started (interval', cap_interval, 's)')
         except Exception as e:
             print('Failed to start capacity worker:', e)
@@ -974,20 +1003,48 @@ def main():
             print('PDGA discs worker started (interval', discs_interval, 's)')
         except Exception as e:
             print('Failed to start PDGA discs worker:', e)
+        # Päivittäinen kilpailudigesti: ajetaan run_once()+rekisteröinnit kerran vuorokaudessa
+        # konfiguroidussa kellonajassa (DAILY_DIGEST_HOUR/MINUTE).
+        # Käytetään globaalia LAST_DIGEST_DATE-arvoa, jotta admin-komennot
+        # voivat nollata tämän tarvittaessa (esim. kellonaikaa muutettaessa).
+        global LAST_DIGEST_DATE
+        last_digest_date = LAST_DIGEST_DATE
+
         while True:
-            try:
-                run_once()
-                # After updating competition files and known caches, run registration check
+            now = datetime.now()
+            today = now.date()
+
+            # Päivitä paikallinen muuttuja globaalista, jotta mahdollinen
+            # admin-komennon tekemä nollaus (LAST_DIGEST_DATE = None)
+            # huomioidaan seuraavalla kierroksella.
+            last_digest_date = LAST_DIGEST_DATE
+
+            should_run = False
+            if last_digest_date != today:
+                # Suoritetaan kun nykyinen kellonaika on asetetun ajan jälkeen.
+                if (now.hour > DAILY_DIGEST_HOUR or
+                        (now.hour == DAILY_DIGEST_HOUR and now.minute >= DAILY_DIGEST_MINUTE)):
+                    should_run = True
+
+            if should_run:
+                print(f"Running daily digest for {today} at {now:%H:%M}")
                 try:
-                    _run_registration_check_once(BASE_DIR)
+                    run_once()
+                    # After updating competition files and known caches, run registration check
+                    try:
+                        _run_registration_check_once(BASE_DIR)
+                    except Exception as e:
+                        print('Registration check failed after run_once:', e)
+                    last_digest_date = today
+                    LAST_DIGEST_DATE = today
                 except Exception as e:
-                    print('Registration check failed after run_once:', e)
-            except Exception as e:
-                print('Run failed in daemon loop:', e)
-            # sleep interval
+                    print('Run failed in daemon loop:', e)
+
+            # sleep interval: tarkistetaan tilanne esim. 5–10 minuutin välein
             mins = max(0.1, args.interval_minutes)
             secs = mins * 60.0
-            print(f'Next run in {mins} minutes')
+            next_check = datetime.now() + timedelta(minutes=mins)
+            print(f"Next daily-digest check at {next_check:%H:%M} (in {mins} minutes)")
             time.sleep(secs)
 
 
