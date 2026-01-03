@@ -173,6 +173,11 @@ async def handle_admin(message: Any, parts: Any) -> None:
             # Päivitä myös ympäristömuuttujat, jotta seuraava käynnistys käyttää samaa aikaa
             os.environ["DAILY_DIGEST_HOUR"] = str(hour)
             os.environ["DAILY_DIGEST_MINUTE"] = f"{minute:02d}"
+            # Kirjaa muutos prosessin lokiin (sama konsoli kuin start_botin tulosteet)
+            try:
+                print(f"[ADMIN] Päivitetty päivittäisen raportin kellonaika: {hour:02d}:{minute:02d}")
+            except Exception:
+                pass
         except Exception as exc:  # pragma: no cover - erittäin epätodennäköinen
             await channel.send(f"Virhe asetuksia päivitettäessä: {exc}")
             return
@@ -207,6 +212,12 @@ async def handle_admin(message: Any, parts: Any) -> None:
             return
 
         os.environ[env_name] = target_id
+        # Kirjaa muutos prosessin lokiin
+        try:
+            print(f"[ADMIN] Asetettu {kind}-ilmoitusten kohdekanavaksi/säikeeksi ID {target_id} (env {env_name}).")
+        except Exception:
+            pass
+
         await channel.send(f"Asetettu {kind}-ilmoitusten kohdekanavaksi/säikeeksi ID {target_id}.")
         return
 

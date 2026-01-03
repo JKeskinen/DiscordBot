@@ -49,6 +49,9 @@ def check_competition(comp: dict) -> dict:
         'name': comp.get('name') or comp.get('title'),
         'url': url,
         'kind': comp.get('kind') or comp.get('tier') or '',
+        # säilytä myös päivämääräkenttä, jotta !rek voi näyttää sen
+        # ja käyttää tarvittaessa sarjarungon tunnistamiseen
+        'date': comp.get('date') or comp.get('start_date'),
         'registration_open': False,
         'opening_soon': False,
         'opens_in_days': None,
@@ -144,6 +147,24 @@ def check_competition(comp: dict) -> dict:
             result['registration_open'] = True
             result['note'] = 'keyword in meta'
             return result
+        # Finnish fallback: jos sivulla mainitaan "ilmoittautuminen" mutta ei selviä
+        # "päättynyt"- tai "suljettu"-tyyppisiä sulkeutumismerkkejä, tulkitaan
+        # ilmoittautumisen olevan käynnissä. Tämä auttaa erityisesti
+        # viikkokisoissa, joissa käytetään suomenkielistä UI-tekstiä.
+        try:
+            closed_markers = [
+                'päättynyt',
+                'päättynyt',
+                'suljettu',
+                'ei ole vielä alkanut',
+            ]
+            if 'ilmoittautuminen' in lowered:
+                if not any(m in lowered for m in closed_markers):
+                    result['registration_open'] = True
+                    result['note'] = 'finnish ilmoittautuminen heuristic'
+                    return result
+        except Exception:
+            pass
         # not found
         result['note'] = 'no registration indicators'
         return result

@@ -88,19 +88,23 @@ DISCORD_SHOW_LOCATION = os.environ.get('DISCORD_SHOW_LOCATION', '0') == '1'
 DISCORD_LINE_SPACING = max(1, int(os.environ.get('DISCORD_LINE_SPACING', '1')))
 
 def _format_date_field(raw_date: str) -> str:
-    """Try to extract a date like DD/MM/YY or DD/MM/YYYY from raw_date and format it.
-    Supported DISCORD_DATE_FORMAT: 'DDMMYYYY' or 'original'. Returns empty string if no date found.
+    """Try to extract a date like MM/DD/YY or MM/DD/YYYY from raw_date and
+    output it eurooppalaisittain DD/MM/YYYY-muodossa.
+
+    Jos DISCORD_DATE_FORMAT == 'DDMMYYYY', palautetaan ilman erottimia
+    muodossa DDMMYYYY. Muuten käytetään 'DD/MM/YYYY'.
     """
     if not raw_date:
         return ''
-    # Find first date-like occurrence
+    # Etsi ensimmäinen "MM/DD/YY"-tyyppinen päivämääräteksti.
     m = re.search(r'(\d{1,2})/(\d{1,2})/(\d{2,4})', raw_date)
     if not m:
         return '' if DISCORD_DATE_FORMAT == 'DDMMYYYY' else raw_date
-    d, mo, y = m.groups()
+    mo, d, y = m.groups()  # Metrix antaa muodossa MM/DD/YY → vaihdetaan paikkaa
     if len(y) == 2:
         y = '20' + y
-    d = d.zfill(2); mo = mo.zfill(2)
+    d = d.zfill(2)
+    mo = mo.zfill(2)
     if DISCORD_DATE_FORMAT == 'DDMMYYYY':
         return f"{d}{mo}{y}"
     return f"{d}/{mo}/{y}"
@@ -318,9 +322,71 @@ def run_once():
     weekly_list = _read_json(os.path.join(base_dir, 'VIIKKOKISA.json'))
     doubles_list = _read_json(os.path.join(base_dir, 'DOUBLES.json'))
 
+    # Suodata pois pelkät "runko"-sarjat (esim. "FGK viikkarit 2026"),
+    # jotta viestissä näkyvät vain varsinaiset kilpailukerrat (nuolimerkinnällä "→").
+    def _is_weekly_container(item, all_items):
+        try:
+            title = item.get('title') or item.get('name') or ''
+        except Exception:
+            return False
+        # Jos otsikossa on nuoli, kyse ei ole rungosta
+        if '→' in title:
+            return False
+        prefix = f"{title} → " if title else ''
+        if not prefix.strip():
+            return False
+        for other in all_items:
+            if other is item:
+                continue
+            try:
+                ot = other.get('title') or other.get('name') or ''
+            except Exception:
+                continue
+            if ot.startswith(prefix):
+                return True
+        return False
+
+    weekly_display_list = [w for w in weekly_list if not _is_weekly_container(w, weekly_list)]
+
+    # Suodata vastaavalla logiikalla PDGA-puolelta pois sarjarungot, kuten
+    # "WDG:n PDGA-Liiga 1/2026", jotta listalla näkyvät pääasiassa
+    # yksittäiset kilpailut tai kierrokset.
+    def _is_pdga_container(item, all_items):
+        try:
+            title = item.get('name') or item.get('title') or ''
+        except Exception:
+            return False
+        if not title:
+            return False
+        # Nuolet otsikossa -> ei ole runko
+        if '→' in title:
+            return False
+        prefix = f"{title} → "
+        for other in all_items:
+            if other is item:
+                continue
+            try:
+                ot = (other.get('name') or other.get('title') or '').strip()
+            except Exception:
+                continue
+            if ot.startswith(prefix):
+                return True
+        # Pitkä päivämääräväli (esim. "01/01/26 - 12/31/26") viittaa usein sarjaan.
+        try:
+            date_txt = str(item.get('date') or '')
+        except Exception:
+            date_txt = ''
+        if '-' in date_txt:
+            parts_dt = [p.strip() for p in date_txt.split('-')]
+            if len(parts_dt) == 2 and parts_dt[0] and parts_dt[1] and parts_dt[0] != parts_dt[1]:
+                return True
+        return False
+
+    pdga_display_list = [c for c in pdga_list if not _is_pdga_container(c, pdga_list)]
+
     # Prepare summaries
-    pdga_count = len(pdga_list)
-    weekly_count = len(weekly_list)
+    pdga_count = len(pdga_display_list)
+    weekly_count = len(weekly_display_list)
     doubles_count = len(doubles_list)
 
     def fmt_pdga_list(lst, limit=20):
@@ -334,11 +400,27 @@ def run_once():
             lines.append(f"...and {len(lst)-limit} more")
         return '\n'.join(lines) if lines else '(none)'
 
+    def _shorten_series_title(raw_title: str) -> str:
+        """Palauta osakilpailun nimi ilman sarjan/runko-otsikkoa.
+
+        Esim. "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 12 osakilpailu"
+        -> "Luoma-ahon Lauantai Liigan 12 osakilpailu".
+        """
+        try:
+            if not raw_title:
+                return ''
+            if '→' in raw_title:
+                return raw_title.split('→')[-1].strip()
+            return raw_title
+        except Exception:
+            return raw_title
+
     def fmt_weekly_and_doubles(weeks, doubles, limit=20):
         lines = []
         for i, c in enumerate(weeks[:limit]):
             # Build a single line for the competition based on configuration flags
-            title = c.get('title') or c.get('name') or ''
+            raw_title = c.get('title') or c.get('name') or ''
+            title = _shorten_series_title(raw_title)
             raw_date = c.get('date') or ''
             date = _format_date_field(raw_date) if DISCORD_SHOW_DATE else ''
             url = c.get('url') or ''
@@ -373,7 +455,8 @@ def run_once():
         if doubles:
             lines.append('\nDoubles / pairs:')
             for d in doubles[:limit]:
-                title = d.get('title') or d.get('name') or ''
+                raw_title = d.get('title') or d.get('name') or ''
+                title = _shorten_series_title(raw_title)
                 raw_date = d.get('date') or ''
                 date = _format_date_field(raw_date) if DISCORD_SHOW_DATE else ''
                 url = d.get('url') or ''
@@ -410,6 +493,97 @@ def run_once():
         print('DISCORD_TOKEN not set; skipping Discord posts')
         return
 
+    # Lataa kapasiteettiskannauksen tulokset (jos olemassa), jotta voidaan näyttää
+    # kisaajamäärä/limit PDGA-listan riveillä.
+    capacity_by_id = {}
+    capacity_by_url = {}
+    try:
+        cap_path = os.path.join(base_dir, 'CAPACITY_SCAN_RESULTS.json')
+        with open(cap_path, 'r', encoding='utf-8') as f:
+            cap_data = json.load(f) or []
+        for item in cap_data:
+            cid = str(item.get('id') or '')
+            url = item.get('url') or ''
+            cap = item.get('capacity_result') or {}
+            registered = cap.get('registered')
+            limit = cap.get('limit')
+            queued = cap.get('queued')
+            if isinstance(registered, int) and isinstance(limit, int):
+                info = {'registered': registered, 'limit': limit, 'queued': queued}
+                if cid:
+                    capacity_by_id[cid] = info
+                if url:
+                    capacity_by_url[url] = info
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print('Kapasiteettidataa ei voitu lukea PDGA-yhteenvetoa varten:', e)
+
+    # Lataa rekisteröintitilanne pending_registration.json-tiedostosta, jotta
+    # voidaan erottaa avoimet kisat niistä, joissa ilmo ei ole avoinna.
+    reg_status_by_id = {}
+    reg_status_by_url = {}
+    have_reg_status = False
+    try:
+        reg_path = os.path.join(base_dir, REG_CHECK_FILE)
+        with open(reg_path, 'r', encoding='utf-8') as f:
+            reg_data = json.load(f) or []
+        for item in reg_data:
+            cid = str(item.get('id') or '')
+            url = item.get('url') or ''
+            is_open = bool(item.get('registration_open'))
+            if cid:
+                reg_status_by_id[cid] = is_open
+            if url:
+                reg_status_by_url[url] = is_open
+        have_reg_status = True
+    except FileNotFoundError:
+        # Ei pending-tiedostoa vielä -> oletetaan, ettei rekisteröintitietoa ole
+        have_reg_status = False
+    except Exception as e:
+        print('Rekisteröintistatusta ei voitu lukea PDGA-yhteenvetoa varten:', e)
+        have_reg_status = False
+
+    def _capacity_suffix(item) -> str:
+        try:
+            cid = str(item.get('id') or '')
+            url = item.get('url') or ''
+        except Exception:
+            return ''
+        info = None
+        if cid and cid in capacity_by_id:
+            info = capacity_by_id[cid]
+        elif url and url in capacity_by_url:
+            info = capacity_by_url[url]
+        if not info:
+            return ''
+        registered = info.get('registered')
+        limit = info.get('limit')
+        queued = info.get('queued')
+        if not isinstance(registered, int) or not isinstance(limit, int) or limit <= 0:
+            return ''
+
+        # Selvitä onko rekisteröinti avoinna (pending_registration.json perusteella),
+        # jos dataa on saatavilla.
+        is_open = None
+        if have_reg_status:
+            if cid and cid in reg_status_by_id:
+                is_open = reg_status_by_id[cid]
+            elif url and url in reg_status_by_url:
+                is_open = reg_status_by_url[url]
+
+        # Jos kisassa ei ole yhtään ilmoittautunutta pelaajaa, näytetään joko
+        # "0/limit" (kun rekisteröinti on avoinna) tai "(rekisteröinti ei avoinna)"
+        # jos rekisteröinti ei ole avoinna / ei vielä avoinna.
+        if registered == 0:
+            if have_reg_status and not is_open:
+                return " (rekisteröinti ei avoinna)"
+            return f" (0/{limit})"
+
+        if isinstance(queued, int) and queued > 0:
+            return f" ({registered}/{limit}, jono {queued})"
+        return f" ({registered}/{limit})"
+
     # Post PDGA summary using embeds grouped by tier for only newly-discovered competitions
     try:
         def _unique_key(item) -> str:
@@ -438,7 +612,7 @@ def run_once():
             known_pdga = []
 
         known_keys = { _unique_key(x) for x in known_pdga }
-        new_pdga = [c for c in pdga_list if _unique_key(c) not in known_keys]
+        new_pdga = [c for c in pdga_display_list if _unique_key(c) not in known_keys]
 
         if new_pdga:
             groups = {}
@@ -462,10 +636,11 @@ def run_once():
                 for it in items[:40]:
                     name = it.get('name') or it.get('title') or ''
                     url = it.get('url') or ''
+                    suffix = _capacity_suffix(it)
                     if url:
-                        lines.append(f"• [{name}]({url})")
+                        lines.append(f"• [{name}]({url}){suffix}")
                     else:
-                        lines.append(f"• {name}")
+                        lines.append(f"• {name}{suffix}")
                 if len(items) > 40:
                     lines.append(f"...and {len(items)-40} more")
                 embed = {
@@ -483,7 +658,26 @@ def run_once():
                 pdga_msg = f"UUSIA PDGA-KILPAILUJA LISÄTTY ({len(new_pdga)})\n\n" + fmt_pdga_list(new_pdga)
                 post_to_discord(pdga_thread, token, pdga_msg)
         else:
-            print('Ei uusia PDGA-kisoja; ei lähetetä viestiä Discordiin')
+            # Ei uusia PDGA-kisoja -> lähetetään silti päivittäinen yhteenveto
+            print('Ei uusia PDGA-kisoja; lähetetään päivittäinen yhteenveto Discordiin')
+            # Rakennetaan yksi embed kaikista tunnetuista PDGA-kisoista (rajataan tarvittaessa)
+            lines = []
+            for it in pdga_display_list[:40]:
+                name = it.get('name') or it.get('title') or ''
+                url = it.get('url') or ''
+                suffix = _capacity_suffix(it)
+                if url:
+                    lines.append(f"• [{name}]({url}){suffix}")
+                else:
+                    lines.append(f"• {name}{suffix}")
+            if len(pdga_display_list) > 40:
+                lines.append(f"...ja {len(pdga_display_list)-40} muuta PDGA-kisaa")
+            embed = {
+                'title': f'PDGA-kisat (päivittäinen yhteenveto, {len(pdga_display_list)})',
+                'description': "\n".join(lines) or '(ei kisoja)',
+                'color': 16750848
+            }
+            post_embeds_to_discord(pdga_thread, token, [embed])
 
         # Persist the current list as the known cache (overwrite)
         try:
@@ -509,7 +703,8 @@ def run_once():
         title = " ja ".join(p for p in (week_part, double_part) if p) or f"VIIKKARIT ({len(weeks)}) ja PARIKISAT ({len(doubles)})"
         lines = []
         for c in weeks:
-            title_text = c.get('title') or c.get('name') or ''
+            raw_title = c.get('title') or c.get('name') or ''
+            title_text = _shorten_series_title(raw_title)
             raw_date = c.get('date') or ''
             date = _format_date_field(raw_date) if DISCORD_SHOW_DATE else ''
             url = c.get('url') or ''
@@ -535,7 +730,8 @@ def run_once():
             lines.append('')
             lines.append('Parikisat:')
             for d in doubles:
-                title_text = d.get('title') or d.get('name') or ''
+                raw_title = d.get('title') or d.get('name') or ''
+                title_text = _shorten_series_title(raw_title)
                 raw_date = d.get('date') or ''
                 date = _format_date_field(raw_date) if DISCORD_SHOW_DATE else ''
                 url = d.get('url') or ''
@@ -599,7 +795,7 @@ def run_once():
         known_weekly_keys = { _unique_key(x) for x in known_weeklies }
         known_double_keys = { _unique_key(x) for x in known_doubles }
 
-        new_weeklies = [w for w in weekly_list if _unique_key(w) not in known_weekly_keys]
+        new_weeklies = [w for w in weekly_display_list if _unique_key(w) not in known_weekly_keys]
         new_doubles = [d for d in doubles_list if _unique_key(d) not in known_double_keys]
 
         if new_weeklies or new_doubles:
@@ -609,7 +805,13 @@ def run_once():
                 wd_msg = f"VIIKKARIT ({len(new_weeklies)}) ja PARIKISAT ({len(new_doubles)})\n\n" + fmt_weekly_and_doubles(new_weeklies, new_doubles)
                 post_to_discord(weekly_thread, token, wd_msg)
         else:
-            print('Ei uusia viikkokisoja tai parikisoja; ei lähetetä viestiä Discordiin')
+            # Ei uusia viikkokisoja/parikisoja -> lähetetään silti päivittäinen yhteenveto
+            print('Ei uusia viikkokisoja tai parikisoja; lähetetään päivittäinen yhteenveto Discordiin')
+            embed = build_weekly_embed(weekly_display_list, doubles_list)
+            posted = post_embeds_to_discord(weekly_thread, token, [embed])
+            if not posted:
+                wd_msg = f"VIIKKARIT ({len(weekly_display_list)}) ja PARIKISAT ({len(doubles_list)})\n\n" + fmt_weekly_and_doubles(weekly_display_list, doubles_list)
+                post_to_discord(weekly_thread, token, wd_msg)
 
         # Persist known weeklies/doubles (overwrite with current lists)
         try:
@@ -756,23 +958,40 @@ def start_registration_worker(base_dir, interval_seconds: int):
     return t
 
 
+def _run_capacity_scan_and_alerts_once(base_dir):
+    """Suorita kapasiteettiskannaus ja hälytteen päivitys kerran.
+
+    Tämä päivittää CAPACITY_SCAN_RESULTS.json- ja CAPACITY_ALERTS.json-tiedostot
+    ajankohtaisiksi, jotta PDGA-yhteenvedot ja !paikat-komento näyttävät tuoreet
+    lukemat myös kertaluonteisissa ajoissa.
+    """
+    try:
+        import run_capacity_scan as rcs
+        try:
+            rcs.main()
+        except Exception as e:
+            print('Capacity scan failed:', e)
+    except Exception as e:
+        print('Failed to import run_capacity_scan:', e)
+
+    try:
+        from scripts import update_alerts_from_scan as uas
+        try:
+            uas.main()
+        except Exception as e:
+            print('Update alerts from scan failed:', e)
+    except Exception as e:
+        print('Failed to import update_alerts_from_scan:', e)
+
+
 def start_capacity_worker(base_dir, interval_seconds: int):
     """Run capacity scan + alert generation periodically in background.
-    Calls `run_capacity_scan.main()` and `scripts.update_alerts_from_scan.main()`.
+    Calls `_run_capacity_scan_and_alerts_once` in a loop.
     """
     def worker():
         while True:
             try:
-                try:
-                    import run_capacity_scan as rcs
-                    rcs.main()
-                except Exception as e:
-                    print('Capacity scan failed:', e)
-                try:
-                    from scripts import update_alerts_from_scan as uas
-                    uas.main()
-                except Exception as e:
-                    print('Update alerts from scan failed:', e)
+                _run_capacity_scan_and_alerts_once(base_dir)
             except Exception as e:
                 print('Capacity worker error:', e)
             time.sleep(max(10, int(interval_seconds)))
@@ -968,6 +1187,12 @@ def main():
         times = max(1, int(args.times or 1))
         for i in range(times):
             print(f'Run {i+1}/{times}')
+            # Päivitä kapasiteettidata ennen jokaista kertaluonteista ajoa,
+            # jotta PDGA-yhteenvedot käyttävät tuoreita pelaajamääriä.
+            try:
+                _run_capacity_scan_and_alerts_once(BASE_DIR)
+            except Exception as e:
+                print('Capacity scan (once) failed:', e)
             run_once()
             # run registration check once after each run_once when requested
             if args.check_registrations:
@@ -978,12 +1203,13 @@ def main():
         return
 
     if args.daemon:
-        print('Starting metrixbot daemon; daily digest scheduled at '
-              f"{DAILY_DIGEST_HOUR:02d}:{DAILY_DIGEST_MINUTE:02d}")
+        # Käynnistetään varsinainen ajastettu daemon-prosessi.
+        print('Käynnistetään Metrix/LakeusBotti-daemon.')
+        print('Päivittäinen kilpailuraportti (PDGA + viikkarit + rekisteröinnit) '
+              f"ajetaan noin klo {DAILY_DIGEST_HOUR:02d}:{DAILY_DIGEST_MINUTE:02d}.")
         # start registration worker thread
         try:
             start_registration_worker(BASE_DIR, CHECK_REGISTRATION_INTERVAL)
-            print('Registration worker started (interval', CHECK_REGISTRATION_INTERVAL, 's)')
         except Exception as e:
             print('Failed to start registration worker:', e)
         # start capacity scan worker thread
@@ -993,14 +1219,12 @@ def main():
             # Tallenna nykyinen arvo, jotta !admin status voi raportoida sen.
             global CURRENT_CAPACITY_INTERVAL
             CURRENT_CAPACITY_INTERVAL = cap_interval
-            print('Capacity worker started (interval', cap_interval, 's)')
         except Exception as e:
             print('Failed to start capacity worker:', e)
         # start PDGA discs watcher worker thread (default once per day)
         try:
             discs_interval = int(os.environ.get('DISCS_CHECK_INTERVAL', '86400'))
             start_pdga_discs_worker(BASE_DIR, discs_interval)
-            print('PDGA discs worker started (interval', discs_interval, 's)')
         except Exception as e:
             print('Failed to start PDGA discs worker:', e)
         # Päivittäinen kilpailudigesti: ajetaan run_once()+rekisteröinnit kerran vuorokaudessa
@@ -1037,6 +1261,22 @@ def main():
                         print('Registration check failed after run_once:', e)
                     last_digest_date = today
                     LAST_DIGEST_DATE = today
+                    # Tulosta yhteenvedot taustatyöntekijöiden tarkistusväleistä,
+                    # kun kaikki tämän kierroksen tarkistukset on tehty.
+                    try:
+                        reg_interval = CHECK_REGISTRATION_INTERVAL
+                        cap_interval_log = CURRENT_CAPACITY_INTERVAL or CHECK_INTERVAL
+                    except Exception:
+                        reg_interval = CHECK_REGISTRATION_INTERVAL
+                        cap_interval_log = CHECK_INTERVAL
+
+                    discs_interval_log = int(os.environ.get('DISCS_CHECK_INTERVAL', '86400'))
+                    mins_reg = reg_interval / 60.0
+                    mins_cap = cap_interval_log / 60.0
+                    hours_discs = discs_interval_log / 3600.0
+                    print(f"Rekisteröintien tarkistus käynnissä (väli {reg_interval} s (~{mins_reg:.1f} min).")
+                    print(f"Kapasiteettiskannaus ja -hälytykset käynnissä (väli {cap_interval_log} s ~{mins_cap:.1f} min).")
+                    print(f"PDGA-kiekkojen uutuustarkistus käynnissä (väli {discs_interval_log} s ~{hours_discs:.1f} h).")
                 except Exception as e:
                     print('Run failed in daemon loop:', e)
 
@@ -1044,7 +1284,7 @@ def main():
             mins = max(0.1, args.interval_minutes)
             secs = mins * 60.0
             next_check = datetime.now() + timedelta(minutes=mins)
-            print(f"Next daily-digest check at {next_check:%H:%M} (in {mins} minutes)")
+            print(f"Seuraava daily-digest -tarkistus klo {next_check:%H:%M} (noin {mins:.1f} min kuluttua)")
             time.sleep(secs)
 
 

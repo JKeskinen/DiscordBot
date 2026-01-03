@@ -44,7 +44,21 @@ def find_doubles(area_name=None, date1='2026-01-01', date2='2027-01-01'):
                 date = lis[0].get_text(strip=True) if getattr(lis[0], 'get_text', None) else None
             if len(lis) > 1:
                 location = lis[1].get_text(strip=True) if getattr(lis[1], 'get_text', None) else None
-        results.append({'id':comp_id,'title':title,'kind':kind,'date':date,'location':location})
+        # Rakenna absoluuttinen URL aina kun id on saatavilla
+        url_full = ''
+        if comp_id:
+            try:
+                url_full = urllib.parse.urljoin('https://discgolfmetrix.com', f'/{comp_id}')
+            except Exception:
+                url_full = f'https://discgolfmetrix.com/{comp_id}'
+        elif href_str:
+            # fallback jos tunnistettu id puuttuu
+            try:
+                url_full = urllib.parse.urljoin('https://discgolfmetrix.com', href_str)
+            except Exception:
+                url_full = href_str
+
+        results.append({'id':comp_id,'title':title,'kind':kind,'date':date,'location':location,'url':url_full})
 
     # table rows
     for tr in container.select('table.table-list tbody tr'):
@@ -58,7 +72,21 @@ def find_doubles(area_name=None, date1='2026-01-01', date2='2027-01-01'):
         date = cols[1] if len(cols) > 1 else None
         kind = cols[2] if len(cols) > 2 else None
         location = cols[3] if len(cols) > 3 else None
-        results.append({'id':comp_id,'title':name,'kind':kind,'date':date,'location':location})
+
+        # Rakenna absoluuttinen URL aina kun id on saatavilla
+        url_full = ''
+        if comp_id:
+            try:
+                url_full = urllib.parse.urljoin('https://discgolfmetrix.com', f'/{comp_id}')
+            except Exception:
+                url_full = f'https://discgolfmetrix.com/{comp_id}'
+        elif href_str:
+            try:
+                url_full = urllib.parse.urljoin('https://discgolfmetrix.com', href_str)
+            except Exception:
+                url_full = href_str
+
+        results.append({'id':comp_id,'title':name,'kind':kind,'date':date,'location':location,'url':url_full})
 
     # Deduplicate by id
     seen = set()

@@ -122,6 +122,18 @@
     }
   },
   {
+    "id": "3500569",
+    "name": "SFL MASTERS TOUR 2026 MEILAHTI BY CORNY",
+    "url": "https://discgolfmetrix.com/3500569",
+    "capacity_result": {
+      "registered": null,
+      "limit": null,
+      "remaining": null,
+      "note": "metrix-tjing-mention no-visible-limit",
+      "metrix_header_empty": true
+    }
+  },
+  {
     "id": "3512587",
     "name": "WDG:n PDGA-Liiga 1/2026 → 15.2.2026, Talvi-Sorkki",
     "url": "https://discgolfmetrix.com/3512587",
@@ -163,9 +175,9 @@
     "name": "Luolavuoren Talvi",
     "url": "https://discgolfmetrix.com/3520307",
     "capacity_result": {
-      "registered": 21,
+      "registered": 22,
       "limit": 72,
-      "remaining": 51,
+      "remaining": 50,
       "note": "metrix-reg-table",
       "metrix_header_empty": false
     }
@@ -247,21 +259,9 @@
     "name": "Skogby kevätrieha 2026",
     "url": "https://discgolfmetrix.com/3516653",
     "capacity_result": {
-      "registered": 26,
+      "registered": 28,
       "limit": 100,
-      "remaining": 74,
-      "note": "metrix-reg-table",
-      "metrix_header_empty": false
-    }
-  },
-  {
-    "id": "3523248",
-    "name": "FGK viikkarit 2026 → vko 1 - Uimahallinpuisto",
-    "url": "https://discgolfmetrix.com/3523248",
-    "capacity_result": {
-      "registered": 10,
-      "limit": null,
-      "remaining": null,
+      "remaining": 72,
       "note": "metrix-reg-table",
       "metrix_header_empty": false
     }

@@ -72,6 +72,48 @@ async def handle_rek(message: Any, parts: Any) -> None:
             entries = [e for e in entries if is_pdga(e)]
         else:
             entries = [e for e in entries if not is_pdga(e)]
+
+        # Suodata viikkarikomennossa pois "sarjan rungot" kuten
+        # "Luoma-ahon Lauantai Liiga" ja "FGK viikkarit 2026",
+        # jotta listalla näkyvät vain varsinaiset osakilpailut.
+        if target == "weekly" and entries:
+            def _is_series_container(item: Any, all_items: Any) -> bool:
+                try:
+                    title = (item.get("title") or item.get("name") or "").strip()
+                except Exception:
+                    return False
+                if not title:
+                    return False
+                # Jos otsikossa on nuoli, kyse ei ole rungosta
+                if "→" in title:
+                    return False
+                prefix = f"{title} → "
+                # Jos jokin toinen rivi alkaa samalla otsikolla + nuolimerkillä,
+                # tulkitaan tämä sarjarungoksi.
+                for other in all_items:
+                    if other is item:
+                        continue
+                    try:
+                        ot = (other.get("title") or other.get("name") or "").strip()
+                    except Exception:
+                        continue
+                    if ot.startswith(prefix):
+                        return True
+                # Lisäheuristiikka: hyvin pitkä päivämääräväli esim.
+                # "01/01/26 - 12/31/26" viittaa usein kausisarjaan.
+                try:
+                    date_txt = str(item.get("date") or item.get("start_date") or "")
+                except Exception:
+                    date_txt = ""
+                if "-" in date_txt:
+                    # Jos merkkijono näyttää kahdelta päivämäärältä ja ne eroavat,
+                    # kohdellaan sarjarunkona.
+                    parts_dt = [p.strip() for p in date_txt.split('-')]
+                    if len(parts_dt) == 2 and parts_dt[0] and parts_dt[1] and parts_dt[0] != parts_dt[1]:
+                        return True
+                return False
+
+            entries = [e for e in entries if not _is_series_container(e, entries)]
     except Exception:
         pass
 
