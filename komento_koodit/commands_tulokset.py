@@ -593,7 +593,51 @@ def _fetch_competition_results(url: str) -> Optional[Dict[str, Any]]:
         return None
 
 
-def _format_top3_lines_for_result(result: Dict[str, Any]) -> List[str]:
+def _fetch_handicap_table(url: str) -> List[Dict[str, Any]]:
+    """Hae mahdollinen tasoitustulostaulukko (HC) Metrix-kisalta.
+
+    Palauttaa listan riveistä: {position,name,metrix_rating,score_rating,change}
+    Jos taulukkoa ei löydy, palauttaa tyhjän listan.
+    """
+    try:
+        resp = requests.get(url, timeout=20)
+    except Exception:
+        return []
+    if resp.status_code != 200:
+        return []
+
+    soup = BS(resp.text, "html.parser")
+    content = soup.select_one("#content_auto") or soup
+    for table in content.find_all("table"):
+        ths = [th.get_text(strip=True).lower() for th in table.find_all("th")]
+        # Look for the HC table header: contains metrix and rating of score / change
+        if ("rating of metrix" in " ".join(ths)) and ("rating of score" in " ".join(ths) or "change" in " ".join(ths)):
+            rows = []
+            for tr in table.find_all("tr"):
+                tds = tr.find_all("td")
+                if not tds or len(tds) < 4:
+                    continue
+                pos_txt = tds[0].get_text(strip=True)
+                try:
+                    pos = int(pos_txt)
+                except Exception:
+                    pos = None
+                name = tds[1].get_text(strip=True)
+                metrix_rating = tds[2].get_text(strip=True)
+                score_rating = tds[3].get_text(strip=True)
+                change = tds[4].get_text(strip=True) if len(tds) > 4 else ""
+                rows.append({
+                    "position": pos,
+                    "name": name,
+                    "metrix_rating": metrix_rating,
+                    "score_rating": score_rating,
+                    "change": change,
+                })
+            return rows
+    return []
+
+
+def _format_top3_lines_for_result(result: Dict[str, Any], hc_present: bool = False) -> List[str]:
     """Muodosta tekstirivit yksittäisen kilpailun Top3-sijoituksista luokittain."""
 
     classes: List[Dict[str, Any]] = result.get("classes", [])  # type: ignore[assignment]
@@ -641,7 +685,12 @@ def _format_top3_lines_for_result(result: Dict[str, Any]) -> List[str]:
                 if isinstance(pos, int) and pos == 3 and total_num != 0 and r not in top_rows:
                     top_rows.append(r)
         # Tulosta luokan otsikko aina, vaikka top_rows olisi tyhjä
-        lines.append(f"**{cname_fmt}**")
+        # Jos HC-taulukko löytyy ja luokan nimi on "No", tarkoittaa usein
+        # raakatuloksia — korvataan luokan otsikko selkeämmällä merkinnällä.
+        if hc_present and cname.strip().lower() == "no":
+            lines.append("__Raakatulokset__")
+        else:
+            lines.append(f"**{cname_fmt}**")
         if top_rows:
             for r in top_rows:
                 pos = r.get("position")
@@ -668,6 +717,49 @@ def _format_top3_lines_for_result(result: Dict[str, Any]) -> List[str]:
         lines.append("")
 
     return [l for l in lines if l.strip()]
+
+
+def _format_hc_top3_lines(hc_rows: List[Dict[str, Any]]) -> List[str]:
+    """Format HC table rows to Top3 lines, including ties like other results."""
+    lines: List[str] = []
+    if not hc_rows:
+        return lines
+
+    # Determine top rows: include pos 1,2 and all pos 3 (ties handled)
+    top_rows: List[Dict[str, Any]] = []
+    count_3 = 0
+    for r in hc_rows:
+        pos = r.get("position")
+        if not isinstance(pos, int):
+            continue
+        if pos == 1 or pos == 2:
+            top_rows.append(r)
+        elif pos == 3:
+            count_3 += 1
+
+    if count_3 > 0:
+        for r in hc_rows:
+            if isinstance(r.get("position"), int) and r.get("position") == 3 and r not in top_rows:
+                top_rows.append(r)
+
+    # Header
+    lines.append("__Tasoitetut tulokset (HC) Metrix ratingia käyttäen__")
+    if not top_rows:
+        return lines
+
+    for r in top_rows:
+        pos = r.get("position")
+        name = r.get("name") or ""
+        mrt = str(r.get("metrix_rating") or "")
+        srt = str(r.get("score_rating") or "")
+        change = str(r.get("change") or "")
+        pos_s = f"{pos})" if isinstance(pos, int) else "-"
+        tail = f"Metrix {mrt}, Tuloksen {srt}"
+        if change:
+            tail += f" (Muutos {change})"
+        lines.append(f"{pos_s} {name} — {tail}")
+
+    return lines
 
 
 async def _handle_single_viikkari_results(message: Any, raw: str) -> None:
@@ -713,6 +805,13 @@ async def _handle_single_viikkari_results(message: Any, raw: str) -> None:
     hc_lines = []
     raw_lines = []
     classes = result.get("classes", [])
+    # Lisäksi yritetään hakea sivulta tasoitustaulukko (HC), jos sellainen on
+    try:
+        hc_table = _fetch_handicap_table(url)
+    except Exception:
+        hc_table = []
+    if hc_table:
+        hc_lines = _format_hc_top3_lines(hc_table)
     for cls in classes:
         cname = str(cls.get("class_name") or "")
         if "HC" in cname.upper() or "handicap" in cname.lower():
@@ -720,12 +819,12 @@ async def _handle_single_viikkari_results(message: Any, raw: str) -> None:
         else:
             raw_lines.extend(_format_top3_lines_for_result({"classes": [cls]}))
     lines = []
-    if hc_lines:
-        lines.append("__Handicap (HC) tulokset__")
-        lines.extend(hc_lines)
+    # Show raw results first, then handicap (HC) results
     if raw_lines:
         lines.append("__Raakatulokset__")
         lines.extend(raw_lines)
+    if hc_lines:
+        lines.extend(hc_lines)
     desc = "\n".join(lines) if lines else "Tulokset löytyivät, mutta Top3-sijoituksia ei voitu tulkita."
 
     try:
@@ -936,9 +1035,36 @@ async def _handle_weekly_viikkari_results(message: Any, area_mode: str) -> None:
                 if DEBUG_TULOKSET:
                     print(f"    [DEBUG]   RIVI: {r}")
 
-        event_lines = _format_top3_lines_for_result(result)
-        if not event_lines:
+        # Determine if there are any valid result rows (total != 0)
+        valid_rows_exist = False
+        for cls in result.get("classes", []):
+            for r in (cls.get("rows") or []):
+                pos = r.get("position")
+                total_txt = str(r.get("total") or "").strip()
+                try:
+                    m = re.match(r"-?\d+", total_txt)
+                    total_num = int(m.group(0)) if m else None
+                except Exception:
+                    total_num = None
+                if isinstance(pos, int) and total_num not in (None, 0):
+                    valid_rows_exist = True
+                    break
+            if valid_rows_exist:
+                break
+
+        # Also consider HC table presence as valid results
+        try:
+            hc_table = _fetch_handicap_table(url)
+        except Exception:
+            hc_table = []
+
+        if not valid_rows_exist and not hc_table:
+            # No real results yet (e.g., future scheduled event) — skip
             continue
+
+        # Format raw/top3 lines and append HC top3 after raw
+        raw_lines = _format_top3_lines_for_result(result, hc_present=bool(hc_table))
+        hc_lines_local: List[str] = _format_hc_top3_lines(hc_table) if hc_table else []
 
         event_name = title or str(result.get("event_name") or "") or "(nimetön viikkari)"
 
@@ -946,7 +1072,10 @@ async def _handle_weekly_viikkari_results(message: Any, area_mode: str) -> None:
             lines.append("")
         first_event = False
         lines.append(f"[{event_name}]({url})")
-        lines.extend(event_lines)
+        if raw_lines:
+            lines.extend(raw_lines)
+        if hc_lines_local:
+            lines.extend(hc_lines_local)
 
     desc = "\n".join(lines) if lines else "Tälle viikolle ei löytynyt tulostettavia viikkarikisoja."
 

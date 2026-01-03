@@ -72,12 +72,17 @@ async def main():
             print(f"     rows: {len(rows)}")
             for r in rows[:10]:
                 print("      ", r.get("position"), r.get("name"), r.get("total"), r.get("to_par"), r.get("rating"))
-        # Format using existing function
-        lines = ct._format_top3_lines_for_result(result)
-        if lines:
+        # Format using existing function and also fetch HC (handicap) top3
+        hc_rows = ct._fetch_handicap_table(url)
+        lines = ct._format_top3_lines_for_result(result, hc_present=bool(hc_rows))
+        hc_lines = ct._format_hc_top3_lines(hc_rows) if hc_rows else []
+        if lines or hc_lines:
             header = f"== {result.get('event_name') or 'Event'} =="
             all_lines.append(header)
-            all_lines.extend(lines)
+            if lines:
+                all_lines.extend(lines)
+            if hc_lines:
+                all_lines.extend(hc_lines)
 
     if not all_lines:
         print("No Top3 results found for Pohjanmaa weekly competitions.")
