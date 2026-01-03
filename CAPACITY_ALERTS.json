@@ -3,27 +3,9 @@
     "id": "3512042",
     "title": "NBDG Winter Tour™ Powered by Valostore → #6 Iitti",
     "url": "https://discgolfmetrix.com/3512042",
-    "registered": 64,
+    "registered": 69,
     "limit": 72,
-    "remaining": 8,
-    "note": "metrix-playwright-phrase"
-  },
-  {
-    "id": "3512043",
-    "title": "NBDG Winter Tour™ Powered by Valostore → #7 Puolarmaari",
-    "url": "https://discgolfmetrix.com/3512043",
-    "registered": 76,
-    "limit": 80,
-    "remaining": 4,
-    "note": "metrix-playwright-phrase"
-  },
-  {
-    "id": "3523248",
-    "title": "FGK viikkarit 2026 → vko 1 - Uimahallinpuisto",
-    "url": "https://discgolfmetrix.com/3523248",
-    "registered": 1,
-    "limit": 3,
-    "remaining": 2,
-    "note": "metrix-playwright"
+    "remaining": 3,
+    "note": "metrix-reg-table"
   }
 ]

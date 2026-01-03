@@ -928,7 +928,9 @@ def main():
             try:
                 from hyvat_koodit.discord_presence import start_presence
                 # run_forever True for daemon mode; if --once, run_forever=False so it disconnects
-                presence_thread = start_presence(token, status_message=os.environ.get('DISCORD_STATUS', 'MetrixBot'), run_forever=not args.once)
+                # Default status text now matches the LakeusBotti branding;
+                # can be overridden with DISCORD_STATUS.
+                presence_thread = start_presence(token, status_message=os.environ.get('DISCORD_STATUS', 'LakeusBotti'), run_forever=not args.once)
                 try:
                     from hyvat_koodit.command_handler import start_command_listener
                     start_command_listener(token, prefix='!', run_forever=not args.once)

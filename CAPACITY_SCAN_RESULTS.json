@@ -4,10 +4,10 @@
     "name": "SFL MASTERS TOUR VIISARI BY RIEPPO SERVICE OY",
     "url": "https://discgolfmetrix.com/3500547",
     "capacity_result": {
-      "registered": 42,
+      "registered": 49,
       "limit": 72,
-      "remaining": 30,
-      "note": "metrix-playwright-phrase",
+      "remaining": 23,
+      "note": "metrix-reg-table",
       "metrix_header_empty": false
     }
   },
@@ -16,11 +16,11 @@
     "name": "NBDG Winter Tour™ Powered by Valostore → #4 Kukonkoivu",
     "url": "https://discgolfmetrix.com/3509787",
     "capacity_result": {
-      "registered": 85,
+      "registered": 89,
       "limit": 76,
       "remaining": 0,
-      "note": "metrix-playwright-phrase-waitlist",
-      "queued": 9,
+      "note": "metrix-reg-table-waitlist",
+      "queued": 13,
       "metrix_header_empty": false
     }
   },
@@ -29,10 +29,10 @@
     "name": "Wednesday 13:00 1) Skogby",
     "url": "https://discgolfmetrix.com/3519179",
     "capacity_result": {
-      "registered": 3,
+      "registered": 4,
       "limit": 72,
-      "remaining": 69,
-      "note": "metrix-playwright-phrase",
+      "remaining": 68,
+      "note": "metrix-reg-table",
       "metrix_header_empty": false
     }
   },
@@ -41,11 +41,11 @@
     "name": "NBDG Winter Tour™ Powered by Valostore → #5 Ford DGP",
     "url": "https://discgolfmetrix.com/3509798",
     "capacity_result": {
-      "registered": 76,
+      "registered": 81,
       "limit": 72,
       "remaining": 0,
-      "note": "metrix-playwright-phrase-waitlist",
-      "queued": 4,
+      "note": "metrix-reg-table-waitlist",
+      "queued": 9,
       "metrix_header_empty": false
     }
   },
@@ -54,10 +54,10 @@
     "name": "Kirkkonummen talvi By Fribakisat.fi",
     "url": "https://discgolfmetrix.com/3516795",
     "capacity_result": {
-      "registered": 3,
+      "registered": 5,
       "limit": 72,
-      "remaining": 69,
-      "note": "metrix-playwright-phrase",
+      "remaining": 67,
+      "note": "metrix-reg-table",
       "metrix_header_empty": false
     }
   },
@@ -66,10 +66,10 @@
     "name": "NBDG Extra™ Petäjäsuo",
     "url": "https://discgolfmetrix.com/3511868",
     "capacity_result": {
-      "registered": 13,
+      "registered": 16,
       "limit": 72,
-      "remaining": 59,
-      "note": "metrix-playwright-phrase",
+      "remaining": 56,
+      "note": "metrix-reg-table",
       "metrix_header_empty": false
     }
   },
@@ -81,7 +81,7 @@
       "registered": 1,
       "limit": 36,
       "remaining": 35,
-      "note": "metrix-playwright-phrase",
+      "note": "metrix-reg-table",
       "metrix_header_empty": false
     }
   },
@@ -90,10 +90,10 @@
     "name": "NBDG Winter Tour™ Powered by Valostore → #6 Iitti",
     "url": "https://discgolfmetrix.com/3512042",
     "capacity_result": {
-      "registered": 64,
+      "registered": 69,
       "limit": 72,
-      "remaining": 8,
-      "note": "metrix-playwright-phrase",
+      "remaining": 3,
+      "note": "metrix-reg-table",
       "metrix_header_empty": false
     }
   },
@@ -105,7 +105,7 @@
       "registered": 1,
       "limit": 72,
       "remaining": 71,
-      "note": "metrix-playwright-phrase",
+      "note": "metrix-reg-table",
       "metrix_header_empty": false
     }
   },
@@ -114,10 +114,10 @@
     "name": "NBDG Amateurs™ Lemmenlaakso",
     "url": "https://discgolfmetrix.com/3515259",
     "capacity_result": {
-      "registered": 39,
+      "registered": 47,
       "limit": 72,
-      "remaining": 33,
-      "note": "metrix-playwright-phrase",
+      "remaining": 25,
+      "note": "metrix-reg-table",
       "metrix_header_empty": false
     }
   },
@@ -126,10 +126,10 @@
     "name": "WDG:n PDGA-Liiga 1/2026 → 15.2.2026, Talvi-Sorkki",
     "url": "https://discgolfmetrix.com/3512587",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 60,
       "remaining": 60,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -138,10 +138,11 @@
     "name": "NBDG Winter Tour™ Powered by Valostore → #7 Puolarmaari",
     "url": "https://discgolfmetrix.com/3512043",
     "capacity_result": {
-      "registered": 76,
+      "registered": 82,
       "limit": 80,
-      "remaining": 4,
-      "note": "metrix-playwright-phrase",
+      "remaining": 0,
+      "note": "metrix-reg-table-waitlist",
+      "queued": 2,
       "metrix_header_empty": false
     }
   },
@@ -150,10 +151,10 @@
     "name": "WDG:n PDGA-Liiga 1/2026 → 22.2.2026, Talvi-Ravis AM x2",
     "url": "https://discgolfmetrix.com/3512588",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 36,
       "remaining": 36,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -162,10 +163,10 @@
     "name": "Luolavuoren Talvi",
     "url": "https://discgolfmetrix.com/3520307",
     "capacity_result": {
-      "registered": 15,
+      "registered": 20,
       "limit": 72,
-      "remaining": 57,
-      "note": "metrix-playwright-phrase",
+      "remaining": 52,
+      "note": "metrix-reg-table",
       "metrix_header_empty": false
     }
   },
@@ -174,10 +175,10 @@
     "name": "WDG:n PDGA-Liiga 1/2026 → 1.3.2026, Talvi-Lyyti",
     "url": "https://discgolfmetrix.com/3512591",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 72,
       "remaining": 72,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -186,10 +187,10 @@
     "name": "NBDG Winter Tour™ Powered by Valostore → #8 Orimattila",
     "url": "https://discgolfmetrix.com/3512046",
     "capacity_result": {
-      "registered": 24,
+      "registered": 31,
       "limit": 84,
-      "remaining": 60,
-      "note": "metrix-playwright-phrase",
+      "remaining": 53,
+      "note": "metrix-reg-table",
       "metrix_header_empty": false
     }
   },
@@ -198,10 +199,10 @@
     "name": "WDG:n PDGA-Liiga 1/2026 → 8.3.2026, Talvi-Sorkki",
     "url": "https://discgolfmetrix.com/3512592",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 60,
       "remaining": 60,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -210,10 +211,10 @@
     "name": "WDG:n PDGA-Liiga 1/2026 → 15.3.2026, Talvi-Ravis AM x2",
     "url": "https://discgolfmetrix.com/3512593",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 36,
       "remaining": 36,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -222,10 +223,10 @@
     "name": "NBDG Winter Tour™ Powered by Valostore → #9 Sahanmäki",
     "url": "https://discgolfmetrix.com/3512047",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 76,
       "remaining": 76,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -234,10 +235,10 @@
     "name": "WDG:n PDGA-Liiga 1/2026 → 22.3.2026, Talvi-Lyyti",
     "url": "https://discgolfmetrix.com/3512596",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 72,
       "remaining": 72,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -246,10 +247,10 @@
     "name": "Skogby kevätrieha 2026",
     "url": "https://discgolfmetrix.com/3516653",
     "capacity_result": {
-      "registered": 18,
+      "registered": 25,
       "limit": 100,
-      "remaining": 82,
-      "note": "metrix-playwright-phrase",
+      "remaining": 75,
+      "note": "metrix-reg-table",
       "metrix_header_empty": false
     }
   },
@@ -258,10 +259,10 @@
     "name": "FGK viikkarit 2026 → vko 1 - Uimahallinpuisto",
     "url": "https://discgolfmetrix.com/3523248",
     "capacity_result": {
-      "registered": 1,
-      "limit": 3,
-      "remaining": 2,
-      "note": "metrix-playwright",
+      "registered": 3,
+      "limit": null,
+      "remaining": null,
+      "note": "metrix-reg-table",
       "metrix_header_empty": false
     }
   },
@@ -270,10 +271,10 @@
     "name": "Luoma-ahon Lauantai Liiga",
     "url": "https://discgolfmetrix.com/3426381",
     "capacity_result": {
-      "registered": 6,
+      "registered": null,
       "limit": null,
       "remaining": null,
-      "note": "metrix-playwright no-visible-limit",
+      "note": "no-visible-limit",
       "metrix_header_empty": true
     }
   },
@@ -282,10 +283,10 @@
     "name": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 1 osakilpailu",
     "url": "https://discgolfmetrix.com/3426489",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 48,
       "remaining": 48,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -294,10 +295,10 @@
     "name": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 2 osakilpailu",
     "url": "https://discgolfmetrix.com/3426494",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 48,
       "remaining": 48,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -306,10 +307,10 @@
     "name": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 3 osakilpailu",
     "url": "https://discgolfmetrix.com/3426497",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 48,
       "remaining": 48,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -318,10 +319,10 @@
     "name": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 4 osakilpailu",
     "url": "https://discgolfmetrix.com/3426501",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 48,
       "remaining": 48,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -330,10 +331,10 @@
     "name": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 5 osakilpailu",
     "url": "https://discgolfmetrix.com/3426504",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 48,
       "remaining": 48,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -342,10 +343,10 @@
     "name": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 6 osakilpailu",
     "url": "https://discgolfmetrix.com/3426507",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 48,
       "remaining": 48,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -354,10 +355,10 @@
     "name": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 7 osakilpailu",
     "url": "https://discgolfmetrix.com/3426509",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 48,
       "remaining": 48,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -366,10 +367,10 @@
     "name": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 8 osakilpailu",
     "url": "https://discgolfmetrix.com/3426511",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 48,
       "remaining": 48,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -378,10 +379,10 @@
     "name": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 9 osakilpailu",
     "url": "https://discgolfmetrix.com/3426512",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 48,
       "remaining": 48,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -390,10 +391,10 @@
     "name": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 10 osakilpailu",
     "url": "https://discgolfmetrix.com/3426514",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 48,
       "remaining": 48,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -402,10 +403,10 @@
     "name": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 11 osakilpailu",
     "url": "https://discgolfmetrix.com/3426518",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 48,
       "remaining": 48,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   },
@@ -414,10 +415,10 @@
     "name": "Luoma-ahon Lauantai Liiga → Luoma-ahon Lauantai Liigan 12 osakilpailu",
     "url": "https://discgolfmetrix.com/3426521",
     "capacity_result": {
-      "registered": 0,
+      "registered": null,
       "limit": 48,
       "remaining": 48,
-      "note": "metrix-playwright-phrase",
+      "note": "",
       "metrix_header_empty": false
     }
   }

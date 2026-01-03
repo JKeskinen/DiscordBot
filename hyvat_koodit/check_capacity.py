@@ -777,23 +777,51 @@ def fetch_tjing_capacity(tjing_url: str, timeout=10):
         return {'registered': None, 'limit': None, 'remaining': None, 'note': str(e)}
 
 
-def _extract_registered_and_limit(text: str):
+def _extract_registered_and_limit(text: str, source_url: str = ''):
     """Try multiple heuristics to find registered and limit numbers from page text.
     Returns (registered:int, limit:int) or (None, None) if not found.
+
+    The optional source_url is used to slightly tweak heuristics for
+    specific sites (e.g. avoid misinterpreting generic "1/3" patterns
+    on Metrix scorecards as capacity information).
     """
     if not text:
         return (None, None)
     t = text
+    source_url = (source_url or '')
 
-    # 1) look for patterns like "12 / 30" or "12/30"
-    m = re.search(r"(\d{1,4})\s*/\s*(\d{1,4})", t)
-    if m:
-        try:
-            reg = int(m.group(1))
-            lim = int(m.group(2))
-            return (reg, lim)
-        except Exception:
-            pass
+    # 0) Prefer explicit header-style phrases if present, e.g.
+    # "Rekisteröityneiden pelaajien määrä: 12" and
+    # "Maksimi osallistujamäärä: 72" in Metrix main header meta.
+    # If we find these, trust them over more generic patterns below.
+    try:
+        reg_header = None
+        lim_header = None
+        m_reg_hdr = re.search(r"Rekisteröityneiden\s+pelaajien\s+määrä[:\s]*([0-9]{1,4})", t, re.I)
+        if m_reg_hdr:
+            reg_header = int(m_reg_hdr.group(1))
+        m_lim_hdr = re.search(r"(?:Maksimi|Suurin)\s+osallistujamäärä[:\s]*([0-9]{1,4})", t, re.I)
+        if m_lim_hdr:
+            lim_header = int(m_lim_hdr.group(1))
+        if reg_header is not None or lim_header is not None:
+            return (reg_header, lim_header)
+    except Exception:
+        pass
+
+    # 1) look for patterns like "12 / 30" or "12/30".
+    # These are very generic and can appear in scorecards as well.
+    # To avoid misreading Metrix score tables (e.g. "1/3") as
+    # capacity info, skip this heuristic for discgolfmetrix.com and
+    # rely on more explicit phrases instead.
+    if 'discgolfmetrix.com' not in source_url.lower():
+        m = re.search(r"(\d{1,4})\s*/\s*(\d{1,4})", t)
+        if m:
+            try:
+                reg = int(m.group(1))
+                lim = int(m.group(2))
+                return (reg, lim)
+            except Exception:
+                pass
 
     # 1b) look for explicit 'Maximum number of players: 36' and variants
     m_maxphrase = re.search(r"(?:maximum(?: number of)? players|maximum players|max players|maksimi|maksimimäärä|max antal spelare)[:\s]*?(\d{1,4})", t, re.I)
@@ -864,7 +892,7 @@ def check_competition_capacity(url: str, timeout=15):
         except Exception:
             pass
 
-        reg, lim = _extract_registered_and_limit(page_text)
+        reg, lim = _extract_registered_and_limit(page_text, url)
         remaining = None
         note = ''
         if reg is not None and lim is not None:
@@ -874,6 +902,50 @@ def check_competition_capacity(url: str, timeout=15):
             remaining = lim
         elif reg is not None and lim is None:
             remaining = None
+
+        # For Metrix registration pages, if we still don't know the
+        # registered count, try to count rows in the registration
+        # table (identified by "Rekisteröitynyt" column header),
+        # first on the current page and then on the explicit
+        # "view=registration" view if needed.
+        try:
+            if reg is None and 'discgolfmetrix.com' in (url or '').lower():
+                def _count_reg_from_soup(s):
+                    tables_local = s.find_all('table', class_=re.compile(r'\bdata\b'))
+                    for tbl in tables_local:
+                        header_cells_local = [th.get_text(strip=True) for th in tbl.find_all('th')]
+                        if not header_cells_local:
+                            continue
+                        if not any('Rekisteröitynyt' in h or 'Registered' in h for h in header_cells_local):
+                            continue
+                        body_rows_local = tbl.find('tbody').find_all('tr') if tbl.find('tbody') else tbl.find_all('tr')[1:]
+                        if body_rows_local:
+                            return len(body_rows_local)
+                    return None
+
+                # try on the current page first
+                reg_count = _count_reg_from_soup(soup)
+                if reg_count is None:
+                    # then try the explicit registration view
+                    try:
+                        if '?' in url:
+                            reg_url = url + '&view=registration'
+                        else:
+                            reg_url = url + '?view=registration'
+                        rr = requests.get(reg_url, headers=USER_AGENT, timeout=timeout)
+                        if rr.status_code == 200:
+                            rsoup = BS(rr.text, 'html.parser')
+                            reg_count = _count_reg_from_soup(rsoup)
+                    except Exception:
+                        reg_count = None
+
+                if reg_count is not None:
+                    reg = reg_count
+                    if lim is not None:
+                        remaining = lim - reg
+                    note = note or 'metrix-reg-table'
+        except Exception:
+            pass
 
         # If the Metrix page mentions TJing explicitly, prefer following TJing
         # and let TJing extraction override Metrix-extracted numbers.
@@ -959,8 +1031,9 @@ def check_competition_capacity(url: str, timeout=15):
                     except Exception:
                         pass
 
-        # As a last resort, render the page (if Playwright available) and re-run heuristics
-        if sync_playwright is not None:
+        # As a last resort, render the page (if Playwright available)
+        # and re-run heuristics, but only if we have no numbers yet.
+        if reg is None and lim is None and remaining is None and sync_playwright is not None:
             try:
                 with sync_playwright() as p:
                     browser = p.chromium.launch(headless=True)
@@ -1031,7 +1104,7 @@ def check_competition_capacity(url: str, timeout=15):
                     pass
 
                 # re-run heuristics on rendered text
-                reg3, lim3 = _extract_registered_and_limit(body_text or content)
+                reg3, lim3 = _extract_registered_and_limit(body_text or content, url)
                 if reg3 is not None or lim3 is not None:
                     rem = None
                     if reg3 is not None and lim3 is not None:
@@ -1116,17 +1189,36 @@ def find_low_capacity(files=None, threshold=20):
         rem = cap.get('remaining')
         if rem is None:
             continue
-        if rem <= threshold:
-            entry = {
-                'id': c.get('id') or c.get('name') or c.get('title'),
-                'title': c.get('title') or c.get('name') or '',
-                'url': url,
-                'remaining': rem,
-                'registered': cap.get('registered'),
-                'limit': cap.get('limit'),
-                'note': cap.get('note')
-            }
-            alerts.append(entry)
+
+        # Ignore competitions that are not actually close to full.
+        # For events with an explicit limit, require that remaining spots
+        # are at most ~25% of the limit (but at least 1) so that small
+        # events like 1/3 are not treated as "low capacity".
+        lim_val = cap.get('limit')
+        try:
+            if isinstance(lim_val, (int, float)) and lim_val > 0:
+                max_rem_for_limit = max(1, int(lim_val * 0.25))
+                if rem > max_rem_for_limit:
+                    continue
+        except Exception:
+            # If limit is weird, fall back to global threshold only.
+            pass
+
+        # Global safety threshold: never show events with a lot of
+        # remaining spots regardless of limit.
+        if rem > threshold:
+            continue
+
+        entry = {
+            'id': c.get('id') or c.get('name') or c.get('title'),
+            'title': c.get('title') or c.get('name') or '',
+            'url': url,
+            'remaining': rem,
+            'registered': cap.get('registered'),
+            'limit': cap.get('limit'),
+            'note': cap.get('note')
+        }
+        alerts.append(entry)
 
     # persist alerts
     out = os.path.join(base, 'CAPACITY_ALERTS.json')

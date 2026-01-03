@@ -1,0 +1,23 @@
+function load()
+{}
+
+function windowResize()
+{}
+
+function showCource()
+{
+    var url = '';
+    var type = document.getElementById('id_competition_type');
+    if(type)
+        url = '&type='+type.value;   
+    
+    var t = document.getElementById('id_coursecode');
+    if(t)
+        window.location.href='/?u=mystat&cource_id='+t.value+url;
+
+}
+
+function graphClick(value)
+{
+    //alert(value);    
+}

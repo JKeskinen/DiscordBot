@@ -1,152 +1,44 @@
 import threading
 import time
-import os
-import json
-import re
-import asyncio
-import concurrent.futures
 import logging
-import requests
-import csv
-
-try:
-    from bs4 import BeautifulSoup  # type: ignore[import]
-except Exception:
-    BeautifulSoup = None
-
 try:
     import discord  # type: ignore[import]
 except Exception:
     discord = None
 Intents = getattr(discord, 'Intents', None)
 try:
-    from . import check_capacity as capacity_mod
+    from . import commands_rek as rek_commands
 except Exception:
-    capacity_mod = None
+    rek_commands = None
+try:
+    from . import commands_etsi as etsi_commands
+except Exception:
+    etsi_commands = None
+try:
+    from . import commands_help as help_commands
+except Exception:
+    help_commands = None
+try:
+    from . import commands_spots as spots_commands
+except Exception:
+    spots_commands = None
+try:
+    from . import commands_pdga as pdga_commands
+except Exception:
+    pdga_commands = None
+try:
+    from . import commands_metrix as metrix_commands
+except Exception:
+    metrix_commands = None
+try:
+    from . import commands_disc as disc_commands
+except Exception:
+    disc_commands = None
 from typing import Any, cast
 
 
-PDGA_DISC_URL = "https://www.pdga.com/technical-standards/equipment-certification/all"
-PDGA_DISCS_CSV_URL = "https://www.pdga.com/technical-standards/equipment-certification/discs/export"
+logger = logging.getLogger(__name__)
 
-
-def _search_pdga_disc(name: str):
-    """Search PDGA lists for a disc name.
-
-    Prefers the discs CSV export (with technical specs). Falls back to the
-    older HTML equipment list if CSV fetch fails. Returns a list of dicts with
-    keys like: manufacturer, product/model, cert_type/class, date, and various
-    spec fields (max_weight_g, diameter_cm, height_cm, rim_depth_cm,
-    rim_thickness_cm, inside_rim_diameter_cm, rim_depth_diameter_ratio_pct,
-    flexibility_kg, disc_class, cert_number, approved_date, etc.).
-    """
-    name = (name or "").strip()
-    if not name:
-        return []
-
-    q = name.lower()
-
-    # First try the CSV export which contains all technical specifications.
-    try:
-        resp_csv = requests.get(PDGA_DISCS_CSV_URL, timeout=20)
-        if getattr(resp_csv, "status_code", 0) == 200 and resp_csv.text:
-            text = resp_csv.text
-            rows = list(csv.DictReader(text.splitlines()))
-            exact = []
-            partial = []
-            for row in rows:
-                model = (row.get("Disc Model") or "").strip()
-                manu = (row.get("Manufacturer / Distributor") or "").strip()
-                if not model:
-                    continue
-                rec = {
-                    "manufacturer": manu,
-                    "product": model,
-                    "model": model,
-                    "cert_type": (row.get("Class") or "").strip(),
-                    "disc_class": (row.get("Class") or "").strip(),
-                    "date": (row.get("Approved Date") or "").strip(),
-                    "approved_date": (row.get("Approved Date") or "").strip(),
-                    "max_weight_g": (row.get("Max Weight (gr)") or "").strip(),
-                    "diameter_cm": (row.get("Diameter (cm)") or "").strip(),
-                    "height_cm": (row.get("Height (cm)") or "").strip(),
-                    "rim_depth_cm": (row.get("Rim Depth (cm)") or "").strip(),
-                    "inside_rim_diameter_cm": (row.get("Inside Rim Diameter (cm)") or "").strip(),
-                    "rim_thickness_cm": (row.get("Rim Thickness (cm)") or "").strip(),
-                    "rim_depth_diameter_ratio_pct": (row.get("Rim Depth / Diameter Ratio (%)") or "").strip(),
-                    "rim_configuration": (row.get("Rim Configuration") or "").strip(),
-                    "flexibility_kg": (row.get("Flexibility (kg)") or "").strip(),
-                    "max_weight_vint_g": (row.get("Max Weight Vint (gr)") or "").strip(),
-                    "last_year_production": (row.get("Last Year Production") or "").strip(),
-                    "cert_number": (row.get("Certification Number") or "").strip(),
-                }
-                lm = model.lower()
-                if lm == q:
-                    exact.append(rec)
-                elif q in lm:
-                    partial.append(rec)
-            if exact or partial:
-                return exact or partial
-    except Exception:
-        # If CSV fetch fails, fall back to HTML scraping below.
-        pass
-
-    # Legacy fallback: HTML equipment list search
-    try:
-        resp = requests.get(PDGA_DISC_URL, params={"title": name}, timeout=10)
-    except Exception:
-        return []
-
-    if getattr(resp, "status_code", 0) != 200:
-        return []
-
-    html = resp.text or ""
-
-    # Prefer BeautifulSoup when available for robust parsing
-    if BeautifulSoup is not None:
-        try:
-            soup = BeautifulSoup(html, "html.parser")
-            table = soup.find("table", class_="views-table") or soup.find("table")
-            if not table:
-                return []
-            results = []
-            for tr in table.find_all("tr"):
-                tds = tr.find_all("td")
-                if len(tds) < 4:
-                    continue
-                manufacturer = tds[0].get_text(strip=True)
-                product = tds[1].get_text(strip=True)
-                cert_type = tds[2].get_text(strip=True)
-                date = tds[3].get_text(strip=True)
-                if not manufacturer and not product:
-                    continue
-                results.append({
-                    "manufacturer": manufacturer,
-                    "product": product,
-                    "cert_type": cert_type,
-                    "date": date,
-                })
-            return results
-        except Exception:
-            pass
-
-    # Fallback: very naive parsing from plain text
-    results = []
-    lowered = html.lower()
-    if name.lower() not in lowered:
-        return []
-    for line in html.splitlines():
-        if name.lower() in line.lower() and "Disc Certification" in line:
-            parts = [p.strip() for p in line.split("|") if p.strip()]
-            if len(parts) >= 4:
-                manufacturer, product, cert_type, date = parts[0], parts[1], parts[2], parts[3]
-                results.append({
-                    "manufacturer": manufacturer,
-                    "product": product,
-                    "cert_type": cert_type,
-                    "date": date,
-                })
-    return results
 
 
 class CommandListenerThread(threading.Thread):
@@ -156,6 +48,8 @@ class CommandListenerThread(threading.Thread):
         self.prefix = prefix
         self.run_forever = run_forever
         self.client = None
+        # (channel_id, user_id) -> list of candidate disc dicts for !kiekko
+        self.pending_disc_choices = {}
 
     def run(self):
         if discord is None:
@@ -191,599 +85,116 @@ class CommandListenerThread(threading.Thread):
                 if not content:
                     return
 
+                # If user has a pending disc choice from a previous !kiekko,
+                # allow them to reply with a number (1..N) without prefix.
+                key = None
+                try:
+                    key = (str(message.channel.id), str(message.author.id))
+                    pending = self.pending_disc_choices.get(key)
+                except Exception:
+                    pending = None
+
+                if pending:
+                    sel = content.strip()
+                    if sel.isdigit():
+                        idx = int(sel) - 1
+                        if 0 <= idx < len(pending):
+                            best = pending[idx]
+                            # consume the pending selection
+                            try:
+                                if key is not None and key in self.pending_disc_choices:
+                                    del self.pending_disc_choices[key]
+                            except Exception:
+                                pass
+                            if disc_commands is not None and hasattr(disc_commands, 'send_disc_card'):
+                                await disc_commands.send_disc_card(message.channel, best, sel)
+                            else:
+                                await message.channel.send('Virhe: kiekko-komentoa ei voi suorittaa (moduuli puuttuu).')
+                            return
+                    # If content is not a digit, fall through to normal command handling
+
                 parts = content.split()
                 cmd = parts[0].lower() if parts else ''
                 if not cmd.startswith(self.prefix):
                     return
                 command = cmd[len(self.prefix):]
 
-                # --- !rek (existing behaviour) ---
-                if command == 'rek':
-                    # parse command args (allow: !rek, !rek pdga, !rek week)
-                    arg = parts[1].lower() if len(parts) > 1 else None
-
-                    # Load pending registrations
-                    base_dir = os.path.abspath(os.path.dirname(__file__))
-                    # project root
-                    root = os.path.abspath(os.path.join(base_dir, '..'))
-                    pending_path = os.path.join(root, 'pending_registration.json')
-                    entries = []
+                # --- !reset: tyhjennä botin väliaikaiset muistirakenteet ---
+                if command == 'reset':
+                    # Salli komento vain ylläpitäjiltä (jos tieto saatavilla).
+                    is_admin = False
                     try:
-                        with open(pending_path, 'r', encoding='utf-8') as f:
-                            entries = json.load(f)
+                        perms = getattr(getattr(message.author, 'guild_permissions', None), 'administrator', False)
+                        if perms:
+                            is_admin = True
                     except Exception:
-                        entries = []
+                        is_admin = False
 
-                    if not entries:
-                        await message.channel.send('Rekisteröintiä ei löytynyt.')
+                    if not is_admin:
+                        await message.channel.send('Reset-komennon käyttö vaatii ylläpitäjäoikeudet.')
                         return
 
-                    # Filter entries based on which thread/channel the command came from
                     try:
-                        channel_id = str(message.channel.id)
-                        pdga_thread = os.environ.get('DISCORD_PDGA_THREAD')
-                        weekly_thread = os.environ.get('DISCORD_WEEKLY_THREAD')
-
-                        def is_pdga(e):
-                            return 'PDGA' in (e.get('kind') or '').upper()
-
-                        target = None
-                        # explicit arg overrides (e.g. '!rek pdga' or '!rek week')
-                        if arg in ('pdga', 'p'):
-                            target = 'pdga'
-                        elif arg in ('week', 'weekly', 'viikko', 'viikkokisa', 'v'):
-                            target = 'weekly'
-
-                        # env var mapping
-                        if target is None:
-                            if pdga_thread and channel_id == str(pdga_thread):
-                                target = 'pdga'
-                            elif weekly_thread and channel_id == str(weekly_thread):
-                                target = 'weekly'
-
-                        # fallback: inspect channel/thread name
-                        if target is None:
-                            try:
-                                ch_name = (message.channel.name or '').lower()
-                                if 'viikko' in ch_name or 'week' in ch_name:
-                                    target = 'weekly'
-                                elif 'pdga' in ch_name:
-                                    target = 'pdga'
-                            except Exception:
-                                pass
-
-                        # default to weekly if still unknown (safer for !rek used in weekly threads)
-                        if target is None:
-                            target = 'weekly'
-
-                        if target == 'pdga':
-                            entries = [e for e in entries if is_pdga(e)]
-                        else:
-                            entries = [e for e in entries if not is_pdga(e)]
+                        self.pending_disc_choices.clear()
                     except Exception:
                         pass
-
-                    if not entries:
-                        await message.channel.send('Tässä kanavassa ei löytynyt rekisteröitymisiä.')
-                        return
-
-                    # Build a concise reply (limit message length)
-                    lines = []
-                    for e in entries:
-                        kind = (e.get('kind') or '').strip()
-
-                        title = e.get('title') or e.get('name') or ''
-                        url = e.get('url') or ''
-
-                        # prefer a clear date: opening soon text, explicit date fields, or parse from title
-                        date_text = ''
-                        try:
-                            if e.get('opening_soon') and e.get('opens_in_days') is not None:
-                                date_text = f'avautuu {int(e.get("opens_in_days"))} pv'
-                            else:
-                                date_field = e.get('date') or e.get('start_date')
-                                if date_field:
-                                    date_text = str(date_field)
-                                else:
-                                    m = re.search(r'(\d{1,2}\.\d{1,2}\.\d{2,4})', title)
-                                    if m:
-                                        date_text = m.group(1)
-                        except Exception:
-                            date_text = ''
-
-                        # hide the kind label when it's just 'VIIKKOKISA'
-                        if 'VIIKKOKISA' in kind.upper():
-                            kind_display = ''
-                        else:
-                            kind_display = f' ({kind})' if kind else ''
-                        date_display = f' — {date_text}' if date_text else ''
-
-                        if url:
-                            lines.append(f'• [{title}]({url}){kind_display}{date_display}')
-                        else:
-                            lines.append(f'• {title}{kind_display}{date_display}')
-
-                    # Discord max message ~2000 chars; chunk if needed
-                    max_len = 1900
-                    cur = []
-                    cur_len = 0
-                    for ln in lines:
-                        if cur_len + len(ln) + 1 > max_len and cur:
-                            try:
-                                Embed_cls = getattr(discord, 'Embed', None)
-                                if Embed_cls:
-                                    embed = Embed_cls(title='Rekisteröinti avoinna:', description='\n'.join(cur))
-                                    await message.channel.send(embed=embed)
-                                else:
-                                    await message.channel.send('\n'.join(cur))
-                            except Exception:
-                                await message.channel.send('\n'.join(cur))
-                            cur = []
-                            cur_len = 0
-                        cur.append(ln)
-                        cur_len += len(ln) + 1
-
-                    if cur:
-                        try:
-                            Embed_cls = getattr(discord, 'Embed', None)
-                            if Embed_cls:
-                                embed = Embed_cls(title='Rekisteröinti avoinna:', description='\n'.join(cur))
-                                await message.channel.send(embed=embed)
-                            else:
-                                await message.channel.send('\n'.join(cur))
-                        except Exception:
-                            await message.channel.send('\n'.join(cur))
+                    await message.channel.send('Botti resetoitu (väliaikaiset muistirakenteet tyhjennetty).')
                     return
 
-                # --- !etsi: search competitions by area/track/name ---
+                # --- !pdga: player lookup by PDGA number ---
+                if command == 'pdga':
+                    if pdga_commands is not None and hasattr(pdga_commands, 'handle_pdga'):
+                        await pdga_commands.handle_pdga(message, parts)
+                    else:
+                        await message.channel.send('Virhe: pdga-komentoa ei voi suorittaa (moduuli puuttuu).')
+                    return
+
+                # --- !metrix: placeholder Metrix rating/profile command (phase 1) ---
+                if command == 'metrix':
+                    if metrix_commands is not None and hasattr(metrix_commands, 'handle_metrix'):
+                        await metrix_commands.handle_metrix(message, parts)
+                    else:
+                        await message.channel.send('Virhe: metrix-komentoa ei voi suorittaa (moduuli puuttuu).')
+                    return
+
+                # --- !rek (existing behaviour, now delegated) ---
+                if command == 'rek':
+                    if rek_commands is not None and hasattr(rek_commands, 'handle_rek'):
+                        await rek_commands.handle_rek(message, parts)
+                    else:
+                        await message.channel.send('Virhe: rek-komentoa ei voi suorittaa (moduuli puuttuu).')
+                    return
+
+                # --- !etsi: search competitions by area/track/name (delegated) ---
                 if command == 'etsi':
-                    query = ' '.join(parts[1:]).strip().lower() if len(parts) > 1 else None
-                    if not query:
-                        try:
-                            await message.channel.send('Käyttö: !etsi <alue tai rata> — esimerkki: !etsi helsinki')
-                        except Exception:
-                            pass
-                        return
-
-                    base_dir = os.path.abspath(os.path.dirname(__file__))
-                    root = os.path.abspath(os.path.join(base_dir, '..'))
-
-                    candidate_files = [
-                        'PDGA.json',
-                        'VIIKKOKISA.json',
-                        'known_weekly_competitions.json',
-                        'known_pdga_competitions.json',
-                        'known_doubles_competitions.json',
-                        'DOUBLES.json'
-                    ]
-
-                    entries = []
-                    for fname in candidate_files:
-                        path = os.path.join(root, fname)
-                        try:
-                            if os.path.exists(path):
-                                with open(path, 'r', encoding='utf-8') as f:
-                                    data = json.load(f)
-                                    if isinstance(data, list):
-                                        entries.extend(data)
-                                    elif isinstance(data, dict):
-                                        # some files may be dicts mapping ids to entries or lists
-                                        for v in data.values():
-                                            if isinstance(v, list):
-                                                entries.extend(v)
-                                            else:
-                                                entries.append(v)
-                        except Exception:
-                            # ignore bad files
-                            continue
-
-                    if not entries:
-                        await message.channel.send('Kilpailutietokantaa ei löytynyt.')
-                        return
-
-                    fields = ['title', 'name', 'location', 'venue', 'track', 'area', 'place', 'city', 'region', 'kind']
-                    matches = []
-                    q = query.lower()
-                    for e in entries:
-                        try:
-                            hay = ' '.join(str(e.get(f, '') or '') for f in fields).lower()
-                            if q in hay:
-                                matches.append(e)
-                        except Exception:
-                            continue
-
-                    if not matches:
-                        await message.channel.send('Ei kilpailuja löytynyt haulla.')
-                        return
-
-                    lines = []
-                    for e in matches:
-                        title = e.get('title') or e.get('name') or ''
-                        url = e.get('url') or ''
-                        date_text = ''
-                        try:
-                            if e.get('opening_soon') and e.get('opens_in_days') is not None:
-                                date_text = f'avautuu {int(e.get("opens_in_days"))} pv'
-                            else:
-                                date_field = e.get('date') or e.get('start_date')
-                                if date_field:
-                                    date_text = str(date_field)
-                                else:
-                                    m = re.search(r'(\d{1,2}\.\d{1,2}\.\d{2,4})', title)
-                                    if m:
-                                        date_text = m.group(1)
-                        except Exception:
-                            date_text = ''
-
-                        kind = (e.get('kind') or '').strip()
-                        if 'VIIKKOKISA' in kind.upper():
-                            kind_display = ''
-                        else:
-                            kind_display = f' ({kind})' if kind else ''
-                        date_display = f' — {date_text}' if date_text else ''
-
-                        if url:
-                            lines.append(f'• [{title}]({url}){kind_display}{date_display}')
-                        else:
-                            lines.append(f'• {title}{kind_display}{date_display}')
-
-                    # send results chunked
-                    max_len = 1900
-                    cur = []
-                    cur_len = 0
-                    for ln in lines:
-                        if cur_len + len(ln) + 1 > max_len and cur:
-                            try:
-                                Embed_cls = getattr(discord, 'Embed', None)
-                                if Embed_cls:
-                                    embed = Embed_cls(title='Löydetyt kilpailut:', description='\n'.join(cur))
-                                    await message.channel.send(embed=embed)
-                                else:
-                                    await message.channel.send('\n'.join(cur))
-                            except Exception:
-                                await message.channel.send('\n'.join(cur))
-                            cur = []
-                            cur_len = 0
-                        cur.append(ln)
-                        cur_len += len(ln) + 1
-
-                    if cur:
-                        try:
-                            Embed_cls = getattr(discord, 'Embed', None)
-                            if Embed_cls:
-                                embed = Embed_cls(title='Löydetyt kilpailut:', description='\n'.join(cur))
-                                await message.channel.send(embed=embed)
-                            else:
-                                await message.channel.send('\n'.join(cur))
-                        except Exception:
-                            await message.channel.send('\n'.join(cur))
+                    if etsi_commands is not None and hasattr(etsi_commands, 'handle_etsi'):
+                        await etsi_commands.handle_etsi(message, parts)
+                    else:
+                        await message.channel.send('Virhe: etsi-komentoa ei voi suorittaa (moduuli puuttuu).')
                     return
 
                 # --- !kiekko: search PDGA disc approvals ---
                 if command == 'kiekko':
-                    query = ' '.join(parts[1:]).strip()
-                    if not query:
-                        try:
-                            await message.channel.send('K\u00e4ytt\u00f6: !kiekko <kiekon nimi> \u2014 esim: !kiekko destroyer')
-                        except Exception:
-                            pass
-                        return
-
-                    try:
-                        if hasattr(message.channel, 'trigger_typing'):
-                            await message.channel.trigger_typing()
-                    except Exception:
-                        pass
-
-                    loop = asyncio.get_running_loop()
-
-                    def _do_search():
-                        return _search_pdga_disc(query)
-
-                    res = await loop.run_in_executor(None, _do_search)
-
-                    if not res:
-                        try:
-                            await message.channel.send(f'Kiekkoa ei l\u00f6ytynyt haulla: {query}')
-                        except Exception:
-                            pass
-                        return
-
-                    # Use the best match (first in list) and format detailed specs
-                    best = res[0]
-                    model = (best.get('model') or best.get('product') or '').strip() or query
-                    manu = (best.get('manufacturer') or '').strip()
-                    approved = (best.get('approved_date') or best.get('date') or '').strip()
-
-                    max_weight = (best.get('max_weight_g') or '').strip()
-                    diameter = (best.get('diameter_cm') or '').strip()
-                    height = (best.get('height_cm') or '').strip()
-                    rim_depth = (best.get('rim_depth_cm') or '').strip()
-                    rim_thickness = (best.get('rim_thickness_cm') or '').strip()
-                    inside_rim = (best.get('inside_rim_diameter_cm') or '').strip()
-                    ratio = (best.get('rim_depth_diameter_ratio_pct') or '').strip()
-                    disc_class = (best.get('disc_class') or best.get('cert_type') or '').strip()
-                    flex = (best.get('flexibility_kg') or '').strip()
-                    cert_no = (best.get('cert_number') or '').strip()
-                    last_year = (best.get('last_year_production') or '').strip()
-
-                    lines = []
-                    lines.append(model)
-                    if manu:
-                        lines.append(f'Valmistaja: {manu}')
-                    if approved:
-                        lines.append(f'Hyv\u00e4ksytty: {approved}')
-                    if max_weight:
-                        lines.append(f'Paino: {max_weight} g')
-                    if diameter:
-                        lines.append(f'Halkaisija: {diameter} cm')
-                    if height:
-                        lines.append(f'Korkeus: {height} cm')
-                    if rim_depth:
-                        lines.append(f'Rimmin syvyys: {rim_depth} cm')
-                    if rim_thickness:
-                        lines.append(f'Rimmin leveys: {rim_thickness} cm')
-                    if inside_rim:
-                        lines.append(f'Rimmin sis\u00e4halkaisija: {inside_rim} cm')
-                    if ratio:
-                        lines.append(f'Rimmin syvyys/halkaisija: {ratio} %')
-                    if disc_class:
-                        lines.append(f'Luokka: {disc_class}')
-                    if flex:
-                        lines.append(f'Joustavuus: {flex} kg')
-                    if cert_no:
-                        lines.append(f'Sertifikaatti: {cert_no}')
-                    if last_year:
-                        lines.append(f'Viimeinen tuotantovuosi: {last_year}')
-
-                    desc = '\n'.join(lines)
-
-                    try:
-                        Embed_cls = getattr(discord, 'Embed', None)
-                        if Embed_cls:
-                            title = 'L\u00f6ytyi kiekkoja:'
-                            embed = Embed_cls(title=title, description=desc)
-                            # Simple generic PDGA discs link as source
-                            embed.add_field(name='PDGA', value='[Hyv\u00e4ksytyt kiekot](https://www.pdga.com/technical-standards/equipment-certification/discs)', inline=False)
-                            await message.channel.send(embed=embed)
-                        else:
-                            await message.channel.send(f'L\u00f6ytyi kiekkoja:\n{desc}')
-                    except Exception:
-                        try:
-                            await message.channel.send(f'L\u00f6ytyi kiekkoja:\n{desc}')
-                        except Exception:
-                            pass
+                    if disc_commands is not None and hasattr(disc_commands, 'handle_kiekko'):
+                        await disc_commands.handle_kiekko(message, parts, self.pending_disc_choices)
+                    else:
+                        await message.channel.send('Virhe: kiekko-komentoa ei voi suorittaa (moduuli puuttuu).')
                     return
 
-                # --- !help: competition-related commands ---
-                if command == 'help':
-                    try:
-                        title = 'LakeusBotti — APPI — 3.06'
-                        desc = (
-                            'Kilpailukomennot:\n'
-                            '\n'
-                            '!rek — näytä avoimet rekisteröinnit (PDGA / viikon kilpailut)\n'
-                            '!etsi <hakusana> — etsi kilpailuja nimen/alueen/radan perusteella\n'
-                            '!spots — tarkista kilpailujen jäljellä olevat paikat (alle 20 ilmoittaa)\n'
-                            '!kiekko <nimi> — hae PDGA:n kiekko-/varustelistalta (esim. "destroyer")'
-                        )
-                        Embed_cls = getattr(discord, 'Embed', None)
-                        if Embed_cls:
-                            embed = Embed_cls(title=title, description=desc)
-                            embed.set_footer(text='Käytä komentoja kirjoittamalla viestiin esimerkiksi: !rek')
-                            await message.channel.send(embed=embed)
-                        else:
-                            # fallback to a concise plain text message
-                            await message.channel.send(f"**{title}**\n" + desc)
-                    except Exception:
-                        pass
+                # --- !ohje: ohjekomennon käsittely (delegoidaan) ---
+                if command == 'ohje':
+                    if help_commands is not None and hasattr(help_commands, 'handle_help'):
+                        await help_commands.handle_help(message, parts)
+                    else:
+                        await message.channel.send('Ohje ei ole käytettävissä.')
                     return
 
-                # --- !spots: show competitions with few remaining spots ---
-                if command in ('spots', 'paikat', 'capacity'):
-                    logger = logging.getLogger(__name__)
-                    channel = message.channel
-
-                    # Allow passing JSON via three methods (in priority):
-                    # 1) Attachment with a .json file
-                    # 2) Inline JSON text following the command
-                    # 3) Literal keyword requesting the project's CAPACITY_ALERTS.json
-                    provided_res = None
-                    arg_text = ' '.join(parts[1:]).strip() if len(parts) > 1 else ''
-
-                    # 1) attachments
-                    try:
-                        if getattr(message, 'attachments', None):
-                            att = message.attachments[0]
-                            if att.filename.lower().endswith('.json'):
-                                raw = await att.read()
-                                try:
-                                    provided_res = json.loads(raw.decode('utf-8'))
-                                except Exception:
-                                    try:
-                                        provided_res = json.loads(raw)
-                                    except Exception:
-                                        provided_res = None
-                    except Exception:
-                        provided_res = None
-
-                    # 2) inline JSON
-                    if provided_res is None and arg_text:
-                        if arg_text.startswith('{') or arg_text.startswith('['):
-                            try:
-                                provided_res = json.loads(arg_text)
-                            except Exception:
-                                provided_res = None
-                        # allow requesting the stored alerts file by name
-                        elif arg_text.lower() in ('alerts', 'capacity_alerts.json', 'capacity_alerts', 'capalerts', 'file'):
-                            try:
-                                base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-                                alert_path = os.path.join(base_dir, 'CAPACITY_ALERTS.json')
-                                if os.path.exists(alert_path):
-                                    with open(alert_path, 'r', encoding='utf-8') as f:
-                                        provided_res = json.load(f)
-                            except Exception:
-                                provided_res = None
-
-                    # If no inline/attachment JSON was provided, prefer a recent cached
-                    # CAPACITY_ALERTS.json in the project root to avoid running a slow
-                    # live scan when the user simply typed `!spots`.
-                    try:
-                        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-                        alert_path = os.path.join(base_dir, 'CAPACITY_ALERTS.json')
-                        if provided_res is None and not arg_text and os.path.exists(alert_path):
-                            age = time.time() - os.path.getmtime(alert_path)
-                            # prefer cache younger than 1 hour (3600s)
-                            if age < 3600:
-                                try:
-                                    with open(alert_path, 'r', encoding='utf-8') as f:
-                                        provided_res = json.load(f)
-                                    minutes = int(age // 60)
-                                    try:
-                                        await channel.send(f'Käytetään välimuistissa olevia ilmoituksia (päivitetty {minutes} minuuttia sitten).')
-                                    except Exception:
-                                        pass
-                                except Exception:
-                                    provided_res = None
-                    except Exception:
-                        provided_res = None
-
-                    # If a JSON payload was provided, use it directly and skip background scan
-                    if provided_res is not None:
-                        res = provided_res if isinstance(provided_res, list) else (provided_res.get('alerts') if isinstance(provided_res, dict) and provided_res.get('alerts') else [])
-                        if not res:
-                            await channel.send('Ei paikkoja ilmoituksissa (JSON tyhjä).')
-                            return
-
-                        # Build lines and send immediately (no background task)
-                        lines = []
-                        for c in res[:200]:
-                            name = c.get('title') or c.get('name') or c.get('name_en') or c.get('event') or ''
-                            url = c.get('url') or ''
-                            reg = c.get('registered')
-                            lim = c.get('limit')
-                            rem = c.get('remaining')
-                            # prefer computing remaining from reg/lim when possible
-                            if reg is not None and lim is not None:
-                                disp = f'{reg}/{lim}'
-                            elif reg is not None and lim is None:
-                                disp = f'{reg}/?'
-                            elif reg is None and lim is not None:
-                                disp = f'?/{lim}'
-                            else:
-                                disp = f'järjellä {rem if rem is not None else "?"} paikkaa'
-
-                            if url:
-                                lines.append(f'• [{name}]({url}) — {disp}')
-                            else:
-                                lines.append(f'• {name} — {disp}')
-
-                        max_len = 1900
-                        cur = []
-                        cur_len = 0
-                        for ln in lines:
-                            if cur and cur_len + len(ln) + 1 > max_len:
-                                try:
-                                    Embed_cls = getattr(discord, 'Embed', None)
-                                    if Embed_cls:
-                                        embed = Embed_cls(title='Kilpailut, joissa vähän paikkoja:', description='\n'.join(cur))
-                                        await channel.send(embed=embed)
-                                    else:
-                                        await channel.send('\n'.join(cur))
-                                except Exception:
-                                    await channel.send('\n'.join(cur))
-                                cur = []
-                                cur_len = 0
-                            cur.append(ln)
-                            cur_len += len(ln) + 1
-
-                        if cur:
-                            try:
-                                Embed_cls = getattr(discord, 'Embed', None)
-                                if Embed_cls:
-                                    embed = Embed_cls(title='Kilpailut, joissa vähän paikkoja:', description='\n'.join(cur))
-                                    await channel.send(embed=embed)
-                                else:
-                                    await channel.send('\n'.join(cur))
-                            except Exception:
-                                await channel.send('\n'.join(cur))
-                        return
-
-                    # Otherwise perform the background capacity check as before
-                    await channel.send('Tarkistan paikkojen tilannetta (suoritetaan taustalla)...')
-
-                    loop = asyncio.get_running_loop()
-
-                    def run_check():
-                        try:
-                            if capacity_mod is None or not hasattr(capacity_mod, 'find_low_capacity'):
-                                logger.warning('Capacity module not available; skipping live check')
-                                return []
-                            return capacity_mod.find_low_capacity()
-                        except Exception as e:
-                            logger.exception('Error in capacity check: %s', e)
-                            return e
-
-                    future = loop.run_in_executor(None, run_check)
-
-                    async def handle_result(fut):
-                        res = await fut
-                        if isinstance(res, Exception):
-                            await channel.send(f'Virhe paikkojen tarkistuksessa: {res}')
-                            return
-                        if not res:
-                            await channel.send('Ei kilpailuja, joissa vähän paikkoja.')
-                            return
-
-                        # Build lines and chunk into Discord-safe messages (<= ~2000 chars)
-                        lines = []
-                        for c in res[:200]:
-                            name = c.get('title') or c.get('name') or c.get('name_en') or c.get('event') or ''
-                            url = c.get('url') or ''
-                            reg = c.get('registered')
-                            lim = c.get('limit')
-                            rem = c.get('remaining')
-                            if reg is not None and lim is not None:
-                                disp = f'{reg}/{lim}'
-                            elif reg is not None and lim is None:
-                                disp = f'{reg}/?'
-                            elif reg is None and lim is not None:
-                                disp = f'?/{lim}'
-                            else:
-                                disp = f'järjellä {rem if rem is not None else "?"} paikkaa'
-                            lines.append(f'• {name} — {disp} — {url}')
-
-                        max_len = 1900
-                        cur = []
-                        cur_len = 0
-                        for ln in lines:
-                            if cur and cur_len + len(ln) + 1 > max_len:
-                                try:
-                                    Embed_cls = getattr(discord, 'Embed', None)
-                                    if Embed_cls:
-                                        embed = Embed_cls(title='Kilpailut, joissa vähän paikkoja:', description='\n'.join(cur))
-                                        await channel.send(embed=embed)
-                                    else:
-                                        await channel.send('\n'.join(cur))
-                                except Exception:
-                                    await channel.send('\n'.join(cur))
-                                cur = []
-                                cur_len = 0
-                            cur.append(ln)
-                            cur_len += len(ln) + 1
-
-                        if cur:
-                            try:
-                                Embed_cls = getattr(discord, 'Embed', None)
-                                if Embed_cls:
-                                    embed = Embed_cls(title='Kilpailut, joissa vähän paikkoja:', description='\n'.join(cur))
-                                    await channel.send(embed=embed)
-                                else:
-                                    await channel.send('\n'.join(cur))
-                            except Exception:
-                                await channel.send('\n'.join(cur))
-
-                    asyncio.create_task(handle_result(future))
+                # --- !paikat: capacity alerts (delegated) ---
+                if command == 'paikat':
+                    if spots_commands is not None and hasattr(spots_commands, 'handle_spots'):
+                        await spots_commands.handle_spots(message, parts)
+                    else:
+                        await message.channel.send('Virhe: paikat-komentoa ei voi suorittaa (moduuli puuttuu).')
             except Exception as ex:
                 try:
                     await message.channel.send('Virhe käsitelläksesi komentoa: ' + str(ex))

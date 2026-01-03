@@ -18,7 +18,9 @@ class PresenceThread(threading.Thread):
             if (token.startswith('"') and token.endswith('"')) or (token.startswith("'") and token.endswith("'")):
                 token = token[1:-1]
         self.token = token
-        self.status_message = status_message or 'MetrixBot'
+        # Default presence text shown under the bot name in Discord.
+        # Use the new bot name by default instead of the legacy "MetrixBot".
+        self.status_message = status_message or 'LakeusBotti'
         self.run_forever = run_forever
         self.client = None
 

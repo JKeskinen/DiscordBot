@@ -1,0 +1,24 @@
+function showCource()
+{
+    var t = document.getElementById('id_coursecode');
+    var user_id = document.getElementById('id_user_id');
+    
+    if(t)
+        window.location.href='/player/'+user_id.value+'&cource_id='+t.value;
+
+}
+
+function toggleUserFollowing(btn, uid) {
+    if ($(btn).html() == lang.follow) {
+        // follow
+        $.ajax({url: 'user_follow.php?follow=' + uid + '&r=' + Math.random(), success: function() {
+            $(btn).html(lang.unfollow);
+        }});
+    }
+    else {
+        // unfollow
+        $.ajax({url: 'user_follow.php?unfollow=' + uid + '&r=' + Math.random(), success: function() {
+            $(btn).html(lang.follow);
+        }});
+    }
+}
