@@ -119,10 +119,11 @@ def _strip_tags(value: str) -> str:
 def _parse_player_stats(html_text: str, metrix_id: str) -> PlayerStats:
     """Yritä parsia oleellisimmat kentät pelaajasivun HTML:stä.
 
-    Hyödynnetään Metrix_juho.html -rakennetta:
-    - Nimi:   <div class="profile-name"><h1>...</h1>
-    - Rating: <div class="metrix-rating"><span>898</span><label>Metrix rating</label></div>
-    - Viimeisin rating-analyysi: taulukko otsikolla "Viimeisin Metrix rating analyysi".
+        Hyödynnetään Metrix_juho.html -rakennetta:
+        - Nimi:   <div class="profile-name"><h1>...</h1>
+        - Rating: <div class="metrix-rating"><span>898</span><label>Metrix rating</label></div>
+        - Viimeisin rating-analyysi: taulukko otsikolla "Metrix-ratingin analyysi" tai
+            vanhemmissa versioissa "Viimeisin Metrix rating analyysi".
     """
 
     profile_url = f"{BASE_PLAYER_URL}{metrix_id}"
@@ -195,9 +196,14 @@ def _parse_player_stats(html_text: str, metrix_id: str) -> PlayerStats:
             except Exception:
                 pass
 
-    # Viimeisin Metrix rating analyysi -taulukko
+    # Metrix rating -analyysitaulukko
     # Käytetään tätä kilpailujen määrään, viimeisimpään kisaan ja parhaaseen kierrokseen.
-    heading_idx = html_text.find("Viimeisin Metrix rating analyysi")
+    #
+    # Uudemmalla sivupohjalla otsikko on "Metrix-ratingin analyysi";
+    # vanhemmissa versioissa "Viimeisin Metrix rating analyysi".
+    heading_idx = html_text.find("Metrix-ratingin analyysi")
+    if heading_idx == -1:
+        heading_idx = html_text.find("Viimeisin Metrix rating analyysi")
     tbody_html: Optional[str] = None
 
     # Ensisijainen: otsikon "Viimeisin Metrix rating analyysi" jälkeen tuleva taulukko
@@ -207,10 +213,10 @@ def _parse_player_stats(html_text: str, metrix_id: str) -> PlayerStats:
         if m_tbody:
             tbody_html = m_tbody.group(1)
 
-    # Varasuunnitelma: etsitään suoraan taulukko, jossa on "Laskettu Metrix rating" -otsikko
+    # Varasuunnitelma: etsitään suoraan taulukko, jossa on Metrix-rating -otsikko
     if tbody_html is None:
         m_tbody2 = re.search(
-            r"Laskettu\s+Metrix\s+rating.*?<tbody>(.*?)</tbody>",
+            r"Metrix[-\s]*rating(?:in)?\s+analyysi.*?<tbody>(.*?)</tbody>",
             html_text,
             re.IGNORECASE | re.DOTALL,
         )
@@ -429,7 +435,7 @@ def _fetch_total_rounds(session: requests.Session, metrix_id: str) -> Optional[i
 
 def _fetch_rating_curve(
     session: requests.Session, metrix_id: str
-) -> Tuple[List[RatingPoint], Optional[float], Optional[str]]:
+) -> Tuple[List[RatingPoint], Optional[float], Optional[str], Optional[int]]:
     """Hae Metrix rating -käyrän (oranssi viiva) pisteet.
 
     Pelaajasivun "Ratingit"-graafi käyttää JSON-endpointtia
@@ -454,23 +460,31 @@ def _fetch_rating_curve(
     try:
         resp = session.get(url, timeout=20)
     except Exception:
-        return [], None, None
+        return [], None, None, None
 
     if resp.status_code != 200:
-        return [], None, None
+        return [], None, None, None
 
     try:
         data = resp.json()
     except Exception:
-        return [], None, None
+        return [], None, None, None
 
     if not isinstance(data, list) or len(data) < 2:
-        return [], None, None
+        return [], None, None, None
+
+    # Quick rating (sininen viiva) oletetaan olevan data[0]
+    quick_len: Optional[int] = None
+    try:
+        if isinstance(data[0], list):
+            quick_len = len(data[0])
+    except Exception:
+        quick_len = None
 
     # Metrix rating (oranssi viiva) oletetaan olevan data[1]
     series = data[1]
     if not isinstance(series, list):
-        return [], None, None
+        return [], None, None, quick_len
 
     points: List[RatingPoint] = []
 
@@ -529,7 +543,7 @@ def _fetch_rating_curve(
                 best_course_rating = rating_val
                 best_course_date = date_str
 
-    return points, best_course_rating, best_course_date
+    return points, best_course_rating, best_course_date, quick_len
 
 
 def fetch_player_stats(metrix_id: str) -> Optional[PlayerStats]:
@@ -661,14 +675,16 @@ def fetch_player_stats(metrix_id: str) -> Optional[PlayerStats]:
     if total_rounds is not None:
         stats.total_rounds = total_rounds
 
-    # 5) Hae Metrix rating -käyrä (oranssi viiva) ja paras
-    # course based rating -peli (vihreä jana) mystat_server_rating-JSONista.
+    # 5) Hae Metrix rating -käyrä (oranssi viiva), Quick rating -sarjan
+    # (sininen viiva) pituus ja paras course based rating -peli (vihreä jana)
+    # mystat_server_rating-JSONista.
     try:
-        curve, best_course_rating, best_course_date = _fetch_rating_curve(session, metrix_id)
+        curve, best_course_rating, best_course_date, quick_series_len = _fetch_rating_curve(session, metrix_id)
     except Exception:
         curve = []
         best_course_rating = None
         best_course_date = None
+        quick_series_len = None
     if curve:
         stats.rating_curve = curve
 
@@ -676,10 +692,25 @@ def fetch_player_stats(metrix_id: str) -> Optional[PlayerStats]:
         stats.best_course_rating = best_course_rating
         stats.best_course_date = best_course_date
 
+    # Jos Quick rating -sarjan (sininen viiva) pituus on suurempi kuin
+    # aiemmin analyysitaulukosta päätelty competitions_count, käytä sitä
+    # kaikkien kisojen määränä.
+    if isinstance(locals().get("quick_series_len"), int):
+        try:
+            qlen = int(quick_series_len)  # type: ignore[arg-type]
+            if qlen > 0:
+                if not isinstance(stats.competitions_count, int) or stats.competitions_count < qlen:
+                    stats.competitions_count = qlen
+        except Exception:
+            pass
+
     # 6) Johda rating ja rating-muutos suoraan oranssin Metrix rating -käyrän
-    # kahdesta viimeisestä pisteestä, jos mahdollista.
+    # kahdesta viimeisestä pisteestä, jos mahdollista. Kilpailujen lukumäärä
+    # otetaan nyt sinisestä Quick rating -sarjasta (quick_series_len), ei
+    # oranssin käyrän pisteiden lukumäärästä.
     if stats.rating_curve:
         curve_all = list(stats.rating_curve)
+
         last_pt = curve_all[-1]
         if getattr(last_pt, "rating", None) is not None:
             try:

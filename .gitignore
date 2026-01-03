@@ -31,6 +31,19 @@ ENV/
 output/
 Omia projekteja/Excel-laskuri/output/
 
+# Local debug HTML dumps from Metrix tooling
+Metrix_*_debug.html
+Metrix_front_debug.html
+Metrix_juho.html
+Metrix_juho_files/
+Metrix_sami.html
+Metrix_sami_files/
+METRIX_SIVU/
+
+# Local debug & helper scripts that shouldn't be committed
+debug_*.py
+scripts/debug_*.py
+
 # Ignore compiled Python files
 *.pyc
 

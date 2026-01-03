@@ -163,32 +163,8 @@ async def handle_metrix(message: Any, parts: Any) -> None:
         except Exception:
             last_rating_date = None
 
-    # Rakennetaan ensin rating-historia, jotta se voidaan näyttää nimen jälkeen.
-    history_lines = []
-    if getattr(stats, "rating_history", None):
-        entries = list(stats.rating_history)[:10]
-        for entry in entries:
-            if entry is None or entry.round_rating is None:
-                continue
-            line_h = f"{entry.date or '?'}: {entry.round_rating:.1f}"
-            if entry.calc_rating is not None and entry.calc_rating != entry.round_rating:
-                line_h += f" (Laskettu {entry.calc_rating:.1f})"
-            elif entry.calc_rating is not None:
-                line_h += f" (Laskettu {entry.calc_rating:.1f})"
-            if entry.course_rating is not None:
-                line_h += f", Radan rating {entry.course_rating:.1f}"
-            if entry.competition:
-                line_h += f" – {entry.competition}"
-            history_lines.append(line_h)
-
     lines = []
     lines.append(f"**{name}**")
-
-    # Näytä viimeisimmät rating-kierrokset heti nimen jälkeen.
-    if history_lines:
-        lines.append("Viimeisimmät rating-kierrokset (taulukosta, max 10):")
-        lines.extend(history_lines)
-        lines.append("")
 
     # Rating-rivi: otsikko boldattuna, luvut normaalina, muutos kokonaislukuna samassa rivissä.
     if rating is not None:
@@ -276,49 +252,26 @@ async def handle_metrix(message: Any, parts: Any) -> None:
                 rating_trend = "".join(parts)
                 trend_values = values
 
-    # Profiililinkki loppuun lyhyellä ankkuritekstillä.
-    if profile_url:
-        lines.append(f"**Linkki:** [Metrix]({profile_url})")
-
-    # Rakennetaan ANSI-värikoodattu blokki vain värillisille osille (Rating + Rating kehitys).
+    # Kevyt ANSI-codeblock: ei taustalaattoja, vain pehmeät värit.
+    # Käytetään dim-värejä: harmaa, teal (ylös), punainen (alas).
     esc = "\x1b"
     reset = f"{esc}[0m"
-    bold_white = f"{esc}[1;37m"   # otsikot kirkkaan valkoisella
-    grey = f"{esc}[0;37m"         # perusarvo / neutraali
-    bright_green = f"{esc}[1;32m" # positiivinen
-    bright_red = f"{esc}[1;31m"   # negatiivinen
+    label_col = f"{esc}[0;37m"          # otsikot normaalilla valkoisella
+    col_flat = f"{esc}[2;37m"           # dim harmaa
+    # Ylös-väri: käytä samaa komboa kuin antamassasi esimerkissä
+    # "\x1b[2;36m\x1b[2;32m↗898\x1b[0m\x1b[2;36m\x1b[0m"
+    col_up = f"{esc}[2;36m{esc}[2;32m"  # dim teal + dim vihreä -kombo
+    col_down = f"{esc}[2;31m"           # dim punainen
 
-    ansi_lines: list[str] = []
+    ansi_block: list[str] = []
 
-    # Rating + muutos (värillisenä)
-    if rating is not None:
-        try:
-            rating_int = int(round(float(rating)))
-        except Exception:
-            rating_int = int(rating) if isinstance(rating, (int, float)) else 0
-
-        rating_colour = bright_green
-        line_rating_ansi = f"{bold_white}Rating:{reset} {rating_colour}{rating_int}{reset}"
-
-        meta_parts: list[str] = []
-        if change_int is not None:
-            if change_int > 0:
-                change_colour = bright_green
-            elif change_int < 0:
-                change_colour = bright_red
-            else:
-                change_colour = grey
-            meta_parts.append(f"muutos: {change_colour}{change_int:+d}{reset}")
-
-        if meta_parts:
-            line_rating_ansi += " (" + ", ".join(meta_parts) + ")"
-
-        ansi_lines.append(line_rating_ansi)
-
-    # Rating-kehitys nuolineen ja väreineen.
+    # Rating-historia nuolineen ja väreineen (teal ylös, punainen alas)
+    # Itse codeblockissa ei ole tekstiä, vain numerot ja nuolet väreillä.
     if trend_values:
         base_val = int(round(trend_values[0]))
-        line_trend = f"{bold_white}Rating kehitys:{reset} {grey}{base_val}{reset}"
+
+        parts: list[str] = []
+        parts.append(f"{col_flat}{base_val}{reset}")
 
         for idx in range(1, len(trend_values)):
             cur = trend_values[idx]
@@ -327,21 +280,30 @@ async def handle_metrix(message: Any, parts: Any) -> None:
             cur_int = int(round(cur))
             if abs(delta) < 0.05:
                 arrow = "→"
-                colour = grey
+                col = col_flat
             elif delta > 0:
                 arrow = "↗"
-                colour = bright_green
+                col = col_up
             else:
                 arrow = "↘"
-                colour = bright_red
-            line_trend += f" {colour}{arrow}{cur_int}{reset}"
+                col = col_down
+            parts.append(f"{col}{arrow}{cur_int}{reset}")
 
-        ansi_lines.append(line_trend)
+        history_line = " ".join(parts)
+        ansi_block.append(history_line)
+
+    if ansi_block:
+        # Otsikko normaalilla tekstillä, vain numerot/nuolet codeblockiin.
+        lines.append("**Rating-historia**")
+        lines.append("```ansi")
+        lines.extend(ansi_block)
+        lines.append("```")
+
+    # Profiililinkki loppuun lyhyellä ankkuritekstillä.
+    if profile_url:
+        lines.append(f"**Linkki:** [Metrix]({profile_url})")
 
     desc = "\n".join(lines)
-
-    if ansi_lines:
-        desc += "\n\n```ansi\n" + "\n".join(ansi_lines) + "\n```"
 
     try:
         Embed_cls = getattr(discord, "Embed", None) if discord is not None else None
