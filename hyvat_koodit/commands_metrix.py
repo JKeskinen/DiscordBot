@@ -27,7 +27,7 @@ def _extract_metrix_id(raw: str) -> str:
 
 
 async def handle_metrix(message: Any, parts: Any) -> None:
-    """!metrix – hae Metrix-rating ja kierroshistoria.
+    """!metrix  hae Metrix-rating ja kierroshistoria.
 
     Käyttö:
       - !metrix 12345         → hakee annetulla Metrix-ID:llä ja tallentaa sen käyttäjälle
@@ -270,8 +270,8 @@ async def handle_metrix(message: Any, parts: Any) -> None:
     if trend_values:
         base_val = int(round(trend_values[0]))
 
-        parts: list[str] = []
-        parts.append(f"{col_flat}{base_val}{reset}")
+        history_parts: list[str] = []
+        history_parts.append(f"{col_flat}{base_val}{reset}")
 
         for idx in range(1, len(trend_values)):
             cur = trend_values[idx]
@@ -287,9 +287,9 @@ async def handle_metrix(message: Any, parts: Any) -> None:
             else:
                 arrow = "↘"
                 col = col_down
-            parts.append(f"{col}{arrow}{cur_int}{reset}")
+            history_parts.append(f"{col}{arrow}{cur_int}{reset}")
 
-        history_line = " ".join(parts)
+        history_line = " ".join(history_parts)
         ansi_block.append(history_line)
 
     if ansi_block:
