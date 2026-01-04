@@ -72,6 +72,12 @@ def build_embeds_with_title(items, title, color):
         lines = []
         for it in part:
             name = it.get('name') or it.get('title') or it.get('id')
+            # If name contains a parent prefix like 'Parent → Child', display only the child
+            try:
+                if '→' in name:
+                    name = name.split('→')[-1].strip()
+            except Exception:
+                pass
             url = it.get('url') or ''
             extra = ''
             # include opens_in_days if present for 'opening soon' items

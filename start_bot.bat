@@ -3,12 +3,24 @@ REM Start the MetrixBot in the project's virtual environment.
 REM Double-click this file to start the bot detached.
 
 SET SCRIPT_DIR=%~dp0
+REM Change working directory to script dir to ensure relative imports/paths work
+PUSHD "%SCRIPT_DIR%"
+
+REM Prefer the virtualenv python if present, otherwise fall back to system python
 SET PYTHON=%SCRIPT_DIR%\.venv\Scripts\python.exe
 
 IF NOT EXIST "%PYTHON%" (
-    echo Virtual environment not found. Create it with: python -m venv .venv
-    pause
-    exit /b 1
+    echo Virtual environment not found at %PYTHON%.
+    echo Attempting to use system python from PATH...
+    where python >nul 2>&1
+    IF ERRORLEVEL 1 (
+        echo No python executable found in PATH. Create a virtualenv with: python -m venv .venv
+        pause
+        POPD
+        exit /b 1
+    ) ELSE (
+        SET PYTHON=python
+    )
 )
 
 REM Daily-digestin kellonaika (tunti ja minuutit, 24h-kello)
@@ -36,6 +48,12 @@ echo Kapasiteettitarkistusväli: %CAPACITY_CHECK_INTERVAL% s (%CAPACITY_CHECK_MI
 echo Metrix daemon interval: %METRIX_INTERVAL_MINUTES% min.
 echo ==========================================
 
+REM Use start to launch the bot in a new window; ensure the script path is quoted
 start "MetrixBot" "%PYTHON%" "%SCRIPT_DIR%metrixbot_verifiedWorking.py" --daemon --presence --interval-minutes %METRIX_INTERVAL_MINUTES%
-echo MetrixBot käynnistetty taustalle.
+if %ERRORLEVEL% EQU 0 (
+    echo MetrixBot käynnistetty taustalle.
+) ELSE (
+    echo MetrixBot failed to start (ERRORLEVEL=%ERRORLEVEL%).
+)
+POPD
 exit /b 0

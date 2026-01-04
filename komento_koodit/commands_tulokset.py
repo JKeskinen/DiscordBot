@@ -470,7 +470,8 @@ def _parse_metrix_date(value: str) -> Optional[date]:
     if " - " in txt:
         txt = txt.split(" - ", 1)[0].strip()
 
-    for fmt in ("%m/%d/%y %H:%M", "%m/%d/%y", "%m/%d/%Y %H:%M", "%m/%d/%Y"):
+    # Prefer Finnish day/month formats first
+    for fmt in ("%d/%m/%y %H:%M", "%d/%m/%y", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d"):
         try:
             dt = datetime.strptime(txt, fmt)
             return dt.date()

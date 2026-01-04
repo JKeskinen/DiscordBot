@@ -127,21 +127,28 @@ async def handle_rek(message: Any, parts: Any) -> None:
         kind = (e.get("kind") or "").strip()
 
         title = e.get("title") or e.get("name") or ""
+        # If title contains a parent prefix like "Parent → Child", display only the child
+        try:
+            if '→' in title:
+                title = title.split('→')[-1].strip()
+        except Exception:
+            pass
         url = e.get("url") or ""
 
         # prefer a clear date: opening soon text, explicit date fields, or parse from title
         date_text = ""
         try:
+            from komento_koodit.date_utils import normalize_date_string
             if e.get("opening_soon") and e.get("opens_in_days") is not None:
                 date_text = f'avautuu {int(e.get("opens_in_days"))} pv'
             else:
                 date_field = e.get("date") or e.get("start_date")
                 if date_field:
-                    date_text = str(date_field)
+                    date_text = normalize_date_string(str(date_field))
                 else:
-                    m = re.search(r"(\d{1,2}\.\d{1,2}\.\d{2,4})", title)
+                    m = re.search(r"(\d{1,2}[\.\/]\d{1,2}[\.\/]\d{2,4})", title)
                     if m:
-                        date_text = m.group(1)
+                        date_text = normalize_date_string(m.group(1))
         except Exception:
             date_text = ""
 

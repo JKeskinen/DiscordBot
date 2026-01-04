@@ -1,6 +1,7 @@
 import os
 import asyncio
 from datetime import datetime, date, timedelta
+from .date_utils import normalize_date_string
 from typing import Any, List
 
 try:
@@ -81,8 +82,8 @@ def _parse_metrix_date(value: str) -> date | None:
     if " - " in txt:
         txt = txt.split(" - ", 1)[0].strip()
 
-    # Kokeillaan useampaa formaattia.
-    for fmt in ("%m/%d/%y %H:%M", "%m/%d/%y", "%m/%d/%Y %H:%M", "%m/%d/%Y"):
+    # Prefer day/month formats (Finnish convention)
+    for fmt in ("%d/%m/%y %H:%M", "%d/%m/%y", "%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d"):
         try:
             dt = datetime.strptime(txt, fmt)
             return dt.date()
@@ -211,6 +212,10 @@ async def handle_viikkarit(message: Any, parts: Any) -> None:
 
     week_entries: list[tuple[date, dict]] = []
 
+    # Decide parsing preference based on source filename: some weekly JSONs use MM/DD
+    month_first_files = ("known_weekly_competitions.json", "VIIKKOKISA.json", "VIIKKARIT_SEUTU.json", "viikkarit_suomi.json")
+    month_first = str(filename or "").lower() in [p.lower() for p in month_first_files]
+
     for e in entries:
         kind = (e.get("kind") or "").upper()
         if "VIIKKOKISA" not in kind:
@@ -224,6 +229,21 @@ async def handle_viikkarit(message: Any, parts: Any) -> None:
                 continue
 
         d_raw = str(e.get("date") or "")
+        # Normalize ambiguous dates to DD/MM/YYYY. If JSON date seems ambiguous
+        # and we have a Metrix URL, fetch the canonical date from Metrix.
+        try:
+            d_norm = normalize_date_string(d_raw, prefer_month_first=month_first)
+        except Exception:
+            d_norm = d_raw
+        if (not d_norm or re.search(r"\d{1,2}/\d{1,2}/\d{2,4}", d_raw)) and isinstance(e, dict) and e.get('url'):
+            try:
+                from .metrix_utils import fetch_metrix_canonical_date
+
+                fetched = fetch_metrix_canonical_date(str(e.get('url') or ''))
+                if fetched:
+                    d_norm = fetched
+            except Exception:
+                pass
         loc_raw = str(e.get("location") or "")
 
         # Pudotetaan pois "runko"-rivit, jotka kuvaavat koko kauden sarjaa eivätkä
@@ -252,7 +272,17 @@ async def handle_viikkarit(message: Any, parts: Any) -> None:
         if is_root:
             continue
 
-        d_parsed = _parse_metrix_date(d_raw)
+        # Parse normalized date (expect DD/MM/YYYY or ISO)
+        d_parsed = None
+        try:
+            if d_norm:
+                d_only = d_norm.split()[0]
+                d_parsed = datetime.strptime(d_only, "%d/%m/%Y").date()
+        except Exception:
+            try:
+                d_parsed = _parse_metrix_date(d_raw)
+            except Exception:
+                d_parsed = None
         if d_parsed is None:
             continue
 

@@ -82,6 +82,69 @@ class CommandListenerThread(threading.Thread):
         client = discord.Client(intents=cast(Any, intents))
         self.client = client
 
+        # Monkey-patch common discord.py send methods to log all outgoing messages
+        try:
+            def _make_send_wrapper(orig):
+                async def _wrapper(self_obj, *a, **kw):
+                    try:
+                        ch_name = getattr(self_obj, 'name', None)
+                        ch_id = getattr(self_obj, 'id', None)
+                        chan_disp = f"#{ch_name}" if ch_name else f"channel_id={ch_id}"
+                        author = getattr(getattr(self, 'user', None), 'name', 'Bot')
+                        print(f"[Outgoing -> Discord] {author} -> {chan_disp}: send called args={len(a)} kwargs={list(kw.keys())}")
+                    except Exception:
+                        try:
+                            print(f"[Outgoing -> Discord] send called: args={len(a)} kwargs={list(kw.keys())}")
+                        except Exception:
+                            pass
+                    try:
+                        res = await orig(self_obj, *a, **kw)
+                        try:
+                            print(f"[Outgoing -> Discord] send succeeded to {chan_disp}")
+                        except Exception:
+                            pass
+                        return res
+                    except Exception as e:
+                        try:
+                            print(f"[Outgoing -> Discord] send FAILED to {chan_disp}: {e}")
+                        except Exception:
+                            pass
+                        raise
+                return _wrapper
+
+            # Try to patch a few common classes used for .send
+            targets = []
+            try:
+                # discord.abc.Messageable base
+                abc_mod = getattr(discord, 'abc', None)
+                if abc_mod and hasattr(abc_mod, 'Messageable'):
+                    targets.append(abc_mod.Messageable)
+            except Exception:
+                pass
+            for name in ('TextChannel', 'DMChannel', 'GuildChannel', 'Thread', 'GroupChannel'):
+                try:
+                    cls = getattr(discord, name, None)
+                    if cls:
+                        targets.append(cls)
+                except Exception:
+                    pass
+
+            seen = set()
+            for cls in targets:
+                try:
+                    if cls in seen:
+                        continue
+                    seen.add(cls)
+                    orig = getattr(cls, 'send', None)
+                    if orig and not getattr(orig, '__is_wrapped_by_log__', False):
+                        wrapper = _make_send_wrapper(orig)
+                        setattr(wrapper, '__is_wrapped_by_log__', True)
+                        setattr(cls, 'send', wrapper)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
         @client.event
         async def on_ready():
             print(f'Komentokuuntelija yhdistetty käyttäjänä {client.user}')
@@ -96,6 +159,22 @@ class CommandListenerThread(threading.Thread):
                 content = (message.content or '').strip()
                 if not content:
                     return
+
+                # Log incoming Discord messages that look like commands (start with prefix)
+                try:
+                    if content.startswith(self.prefix):
+                        chan = getattr(message.channel, 'name', None)
+                        chan_disp = f"#{chan}" if chan else f"channel_id={getattr(message.channel, 'id', 'unknown')}"
+                        try:
+                            author = getattr(message.author, 'name', str(message.author))
+                        except Exception:
+                            author = str(message.author)
+                        print(f"[Discord Command] {author} {chan_disp}: {content}")
+                except Exception:
+                    try:
+                        print(f"[Discord Command] {str(message.author)}: {content}")
+                    except Exception:
+                        pass
 
                 # If user has a pending disc choice from a previous !kiekko,
                 # allow them to reply with a number (1..N) without prefix.
@@ -212,6 +291,14 @@ class CommandListenerThread(threading.Thread):
                         await etsi_commands.handle_etsi(message, parts)
                     else:
                         await message.channel.send('Virhe: etsi-komentoa ei voi suorittaa (moduuli puuttuu).')
+                    return
+
+                # --- !kisa: list competitions (pdga / viikkari) ---
+                if command == 'kisa':
+                    if etsi_commands is not None and hasattr(etsi_commands, 'handle_kisa'):
+                        await etsi_commands.handle_kisa(message, parts)
+                    else:
+                        await message.channel.send('Virhe: kisa-komentoa ei voi suorittaa (moduuli puuttuu).')
                     return
 
                 # --- !kiekko: search PDGA disc approvals ---

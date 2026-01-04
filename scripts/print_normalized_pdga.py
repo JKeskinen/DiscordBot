@@ -102,6 +102,11 @@ def main():
     for it in norm:
         name = it.get('name') or it.get('title') or ''
         date = it.get('date') or ''
+        # remove leading bullet and container prefix like "Luoma-ahon Lauantai Liiga → "
+        name = name.strip()
+        name = re.sub(r'^\s*•\s*', '', name)  # strip leading bullet
+        # strip any leading text up to the first arrow (handles '→' and '->')
+        name = re.sub(r'^(?:.*?)(?:→|->)\s*', '', name, count=1).strip()
         print('- ', name, '|', date)
 
 if __name__ == '__main__':

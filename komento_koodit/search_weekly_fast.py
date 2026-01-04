@@ -7,6 +7,7 @@ import os
 from . import data_store
 import time
 import json
+from .date_utils import normalize_date_string
 
 # Config: area and date window. Read from env if provided.
 AREA = os.environ.get('WEEKLY_LOCATION', 'Etelä-Pohjanmaa')
@@ -52,7 +53,12 @@ if container:
         tspan = a.select_one('.competition-type')
         tier = tspan.get_text(strip=True) if tspan is not None else ''
         meta = a.select('.metadata-list li') or []
-        date = meta[0].get_text(strip=True) if len(meta) > 0 and getattr(meta[0], 'get_text', None) else ''
+        raw_date = meta[0].get_text(strip=True) if len(meta) > 0 and getattr(meta[0], 'get_text', None) else ''
+        try:
+            # Metrix often uses MM/DD/YY; prefer month-first when normalizing
+            date = normalize_date_string(raw_date, prefer_month_first=True) if raw_date else raw_date
+        except Exception:
+            date = raw_date
         location = meta[1].get_text(strip=True) if len(meta) > 1 and getattr(meta[1], 'get_text', None) else ''
         kind = None
         title_l = (title or '').lower()
@@ -90,7 +96,19 @@ if container:
         if m:
             comp_id = m.group(1)
         name = link.get_text(strip=True) if link is not None else cols[0].get_text(strip=True) or ''
-        date = cols[1].get_text(strip=True) if len(cols) > 1 and getattr(cols[1], 'get_text', None) else ''
+        raw_date = cols[1].get_text(strip=True) if len(cols) > 1 and getattr(cols[1], 'get_text', None) else ''
+        date = raw_date
+        try:
+            if raw_date:
+                # Handle ranges like '01/01/26 - 12/31/26'
+                if '-' in raw_date:
+                    parts = [p.strip() for p in raw_date.split('-')]
+                    norm_parts = [normalize_date_string(p, prefer_month_first=True) for p in parts]
+                    date = ' - '.join(n for n in norm_parts if n)
+                else:
+                    date = normalize_date_string(raw_date, prefer_month_first=True)
+        except Exception:
+            date = raw_date
         tier = cols[2].get_text(strip=True) if len(cols) > 2 and getattr(cols[2], 'get_text', None) else ''
         location = cols[3].get_text(strip=True) if len(cols) > 3 and getattr(cols[3], 'get_text', None) else ''
         kind = None

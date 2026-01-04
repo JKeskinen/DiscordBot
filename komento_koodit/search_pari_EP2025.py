@@ -2,6 +2,7 @@ import requests
 from bs4 import BeautifulSoup as BS
 import re
 import urllib.parse
+from .date_utils import normalize_date_string
 
 # Debug + robustness: set a User-Agent and print short response snippets when parsing fails
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; metrixbot/1.0)"}
@@ -41,7 +42,12 @@ def find_doubles(area_name=None, date1='2026-01-01', date2='2027-01-01'):
         if meta is not None:
             lis = meta.find_all('li') or []
             if lis:
-                date = lis[0].get_text(strip=True) if getattr(lis[0], 'get_text', None) else None
+                raw_date = lis[0].get_text(strip=True) if getattr(lis[0], 'get_text', None) else None
+                # Metrix often presents dates as MM/DD/YY — normalize preferring month-first
+                try:
+                    date = normalize_date_string(raw_date, prefer_month_first=True) if raw_date else raw_date
+                except Exception:
+                    date = raw_date
             if len(lis) > 1:
                 location = lis[1].get_text(strip=True) if getattr(lis[1], 'get_text', None) else None
         # Rakenna absoluuttinen URL aina kun id on saatavilla
@@ -70,6 +76,11 @@ def find_doubles(area_name=None, date1='2026-01-01', date2='2027-01-01'):
         name = a.get_text(strip=True) if a is not None else tr.get_text(strip=True)
         cols = [td.get_text(strip=True) for td in tr.find_all('td')]
         date = cols[1] if len(cols) > 1 else None
+        # Normalize date tokens found in table rows as well (assume Metrix month-first)
+        try:
+            date = normalize_date_string(date, prefer_month_first=True) if date else date
+        except Exception:
+            pass
         kind = cols[2] if len(cols) > 2 else None
         location = cols[3] if len(cols) > 3 else None
 

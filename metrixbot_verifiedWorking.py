@@ -742,16 +742,22 @@ def run_once():
                     name = it.get('name') or it.get('title') or ''
                     if not url:
                         continue
+                    u = None
                     try:
-                        u = None
                         u = tulokset_mod._ensure_results_url(url)
-                        res = tulokset_mod._fetch_competition_results(u)
+                        if not u or not isinstance(u, str):
+                            res = None
+                        else:
+                            res = tulokset_mod._fetch_competition_results(u)
                     except Exception:
                         res = None
                     if not res:
                         continue
                     try:
-                        hc = tulokset_mod._fetch_handicap_table(u)
+                        if isinstance(u, str) and u:
+                            hc = tulokset_mod._fetch_handicap_table(u)
+                        else:
+                            hc = []
                     except Exception:
                         hc = []
                     # Build trimmed top3 result
@@ -818,16 +824,22 @@ def run_once():
                     name = it.get('name') or it.get('title') or ''
                     if not url:
                         continue
+                    u = None
                     try:
-                        u = None
                         u = tulokset_mod._ensure_results_url(url)
-                        res = tulokset_mod._fetch_competition_results(u)
+                        if not u or not isinstance(u, str):
+                            res = None
+                        else:
+                            res = tulokset_mod._fetch_competition_results(u)
                     except Exception:
                         res = None
                     if not res:
                         continue
                     try:
-                        hc = tulokset_mod._fetch_handicap_table(u)
+                        if isinstance(u, str) and u:
+                            hc = tulokset_mod._fetch_handicap_table(u)
+                        else:
+                            hc = []
                     except Exception:
                         hc = []
                     filtered_classes = []
@@ -1492,6 +1504,39 @@ def start_pdga_discs_worker(base_dir, interval_seconds: int):
     return t
 
 
+def start_daily_scheduler_thread(hour: int, minute: int, interval_minutes: float = 5.0):
+    """Start a background thread that runs `run_once()` once per day after the given hour:minute.
+
+    This is used when the bot runs with presence/command listener instead of --daemon.
+    The thread is a daemon and will not block process exit.
+    """
+    def sched_worker():
+        global LAST_DIGEST_DATE
+        while True:
+            try:
+                now = datetime.now()
+                today = now.date()
+                if LAST_DIGEST_DATE != today:
+                    if (now.hour > hour) or (now.hour == hour and now.minute >= minute):
+                        try:
+                            print(f"[SCHED] Triggering daily digest at {now:%Y-%m-%d %H:%M}")
+                            run_once()
+                            try:
+                                _run_registration_check_once(BASE_DIR)
+                            except Exception as e:
+                                print('Registration check failed after scheduled run_once:', e)
+                            LAST_DIGEST_DATE = today
+                        except Exception as e:
+                            print('Scheduled run_once failed:', e)
+            except Exception as e:
+                print('Scheduler worker exception:', e)
+            time.sleep(max(30, int(interval_minutes * 60)))
+
+    t = threading.Thread(target=sched_worker, daemon=True)
+    t.start()
+    return t
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='metrixDiscordBot orchestrator')
@@ -1503,12 +1548,32 @@ def main():
     parser.add_argument('--times', type=int, default=1, help='When used with --once, run the orchestrator this many times in sequence')
     args = parser.parse_args()
 
+    # Ensure we treat LAST_DIGEST_DATE as the module-level global throughout main()
+    global LAST_DIGEST_DATE
+
     # Run startup capacity check/posting if token configured
     token = os.environ.get('DISCORD_TOKEN')
     try:
         post_startup_capacity_alerts(BASE_DIR, token)
     except Exception as e:
         print('Startup capacity alert check failed:', e)
+
+    # Optionally run an initial full search on startup. Controlled by env var AUTO_RUN_ON_STARTUP (default 1).
+    try:
+        auto_start = os.environ.get('AUTO_RUN_ON_STARTUP', '1')
+        if auto_start == '1' and not args.once:
+            # Run in background so presence and command listener can start quickly
+            def _startup_run():
+                try:
+                    print('[STARTUP] Running initial competition fetch (run_once)')
+                    run_once()
+                except Exception as e:
+                    print('Startup run_once failed:', e)
+
+            thr = threading.Thread(target=_startup_run, daemon=True)
+            thr.start()
+    except Exception as e:
+        print('Failed to schedule startup run:', e)
 
     # If presence requested, start gateway client now (works for once/daemon modes)
     presence_thread = None
@@ -1531,6 +1596,44 @@ def main():
             except Exception as e:
                 print('Failed to start presence thread:', e)
 
+            # When presence is started (non-daemon mode), start the daily scheduler
+            try:
+                if args.presence and not args.daemon:
+                    try:
+                        start_daily_scheduler_thread(DAILY_DIGEST_HOUR, DAILY_DIGEST_MINUTE)
+                    except Exception as e:
+                        print('Failed to start daily scheduler thread:', e)
+
+                    # Optionally trigger an immediate digest when presence becomes active
+                    # Controlled by RUN_DIGEST_ON_PRESENCE env var (default '1').
+                    try:
+                        run_on_presence = os.environ.get('RUN_DIGEST_ON_PRESENCE', '1') == '1'
+                        if run_on_presence:
+                            today = datetime.now().date()
+                            if LAST_DIGEST_DATE != today:
+                                def _presence_trigger():
+                                    try:
+                                        print('[PRESENCE] Presence active — running immediate daily digest')
+                                        run_once()
+                                        try:
+                                            _run_registration_check_once(BASE_DIR)
+                                        except Exception as e:
+                                            print('Registration check failed after presence-triggered run_once:', e)
+                                        # Update module-level LAST_DIGEST_DATE without declaring global here
+                                        try:
+                                            globals()['LAST_DIGEST_DATE'] = datetime.now().date()
+                                        except Exception:
+                                            pass
+                                    except Exception as e:
+                                        print('Presence-triggered run_once failed:', e)
+
+                                t = threading.Thread(target=_presence_trigger, daemon=True)
+                                t.start()
+                    except Exception as e:
+                        print('Failed to trigger presence-based digest:', e)
+            except Exception:
+                pass
+
     if args.once:
         times = max(1, int(args.times or 1))
         for i in range(times):
@@ -1552,7 +1655,7 @@ def main():
 
     if args.daemon:
         # Käynnistetään varsinainen ajastettu daemon-prosessi.
-        print('Käynnistetään Metrix/LakeusBotti-daemon.')
+        print('Käynnistetään LakeusBotti')
         print('Päivittäinen kilpailuraportti (PDGA + viikkarit + rekisteröinnit) '
               f"ajetaan noin klo {DAILY_DIGEST_HOUR:02d}:{DAILY_DIGEST_MINUTE:02d}.")
         # start registration worker thread
@@ -1580,7 +1683,6 @@ def main():
         # konfiguroidussa kellonajassa (DAILY_DIGEST_HOUR/MINUTE).
         # Käytetään globaalia LAST_DIGEST_DATE-arvoa, jotta admin-komennot
         # voivat nollata tämän tarvittaessa (esim. kellonaikaa muutettaessa).
-        global LAST_DIGEST_DATE
         last_digest_date = LAST_DIGEST_DATE
 
         while True:

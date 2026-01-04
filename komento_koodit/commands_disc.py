@@ -16,6 +16,8 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     discord = None  # type: ignore[assignment]
 
+from .date_utils import normalize_date_string
+
 
 logger = logging.getLogger(__name__)
 
@@ -306,6 +308,11 @@ async def send_disc_card(channel: Any, best: Dict[str, Any], query_fallback: str
     model = (best.get("model") or best.get("product") or "").strip() or query_fallback
     manu = (best.get("manufacturer") or "").strip()
     approved = (best.get("approved_date") or best.get("date") or "").strip()
+    if approved:
+        try:
+            approved = normalize_date_string(approved)
+        except Exception:
+            pass
 
     max_weight = (best.get("max_weight_g") or "").strip()
     diameter = (best.get("diameter_cm") or "").strip()
@@ -454,6 +461,11 @@ async def handle_kiekko(message: Any, parts: Any, pending_disc_choices: Dict[Tup
             model_opt = (d.get("model") or d.get("product") or "").strip() or "(tuntematon)"
             manu_opt = (d.get("manufacturer") or "").strip()
             date_opt = (d.get("approved_date") or d.get("date") or "").strip()
+            if date_opt:
+                try:
+                    date_opt = normalize_date_string(date_opt)
+                except Exception:
+                    pass
             parts_opt = [f"{i}) {model_opt}"]
             if manu_opt:
                 parts_opt.append(f"— {manu_opt}")
