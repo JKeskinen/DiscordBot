@@ -223,6 +223,6 @@ def get_help_message(topic: Optional[str] = None) -> Dict[str, str]:
     # Seura / pelaajaranking
     if normalized in {"seura", "seuraranking", "seura ranking", "pelaajaranking", "pelaaja ranking", "ranking", "seuramenestys", "menestys", "menestyjät", "seura_ranking"}:
         # Use the pelaajaranking help which documents seuramenestys and related commands
-        return {"title": "PelaajaRanking", "description": _pelaajaranking_help_description()}
+        return {"title": "SeuraRanking", "description": _seuraranking_help_description()}
 
     return {"title": BASE_TITLE, "description": _general_help_description()}

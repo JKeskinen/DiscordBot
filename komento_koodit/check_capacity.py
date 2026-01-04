@@ -14,6 +14,28 @@ except Exception:
 USER_AGENT = {'User-Agent': 'Mozilla/5.0 (metrixbot-capacity)'}
 
 logger = logging.getLogger(__name__)
+try:
+    import settings
+except Exception:
+    settings = None
+
+# Allow overriding user-agent and Playwright usage from settings.py
+if settings is not None:
+    try:
+        ua = getattr(settings, 'USER_AGENT', None)
+        if ua:
+            USER_AGENT = {'User-Agent': str(ua)}
+    except Exception:
+        pass
+
+USE_PLAYWRIGHT = True
+if settings is not None:
+    try:
+        val = getattr(settings, 'USE_PLAYWRIGHT', None)
+        if val is not None:
+            USE_PLAYWRIGHT = bool(int(str(val))) if isinstance(val, (str, int)) else bool(val)
+    except Exception:
+        USE_PLAYWRIGHT = True
 
 
 def _sanitize_capacity(res: dict) -> dict:

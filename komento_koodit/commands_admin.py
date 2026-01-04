@@ -12,6 +12,10 @@ try:
 except Exception:  # pragma: no cover
     orchestrator = None  # type: ignore[assignment]
 
+try:
+    import settings
+except Exception:  # pragma: no cover
+    settings = None  # type: ignore[assignment]
 
 async def _require_admin(message: Any) -> bool:
     """Palauta True jos lähettäjällä on ylläpitäjäoikeudet, muuten vastaa virheellä."""
@@ -31,8 +35,21 @@ async def _require_admin(message: Any) -> bool:
 
 
 def _get_current_digest_time() -> str:
-    hour = getattr(orchestrator, "DAILY_DIGEST_HOUR", None) if orchestrator else None
-    minute = getattr(orchestrator, "DAILY_DIGEST_MINUTE", None) if orchestrator else None
+    # Prefer the running orchestrator's values, then settings module, then environment.
+    hour = None
+    minute = None
+    try:
+        if orchestrator is not None:
+            hour = getattr(orchestrator, "DAILY_DIGEST_HOUR", None)
+            minute = getattr(orchestrator, "DAILY_DIGEST_MINUTE", None)
+    except Exception:
+        hour = minute = None
+    if not (isinstance(hour, int) and isinstance(minute, int)) and settings is not None:
+        try:
+            hour = getattr(settings, "DAILY_DIGEST_HOUR", hour)
+            minute = getattr(settings, "DAILY_DIGEST_MINUTE", minute)
+        except Exception:
+            pass
     try:
         if isinstance(hour, int) and isinstance(minute, int):
             return f"{hour:02d}:{minute:02d}"
@@ -54,6 +71,11 @@ def _get_current_capacity_interval() -> str:
     interval = None
     if orchestrator is not None:
         interval = getattr(orchestrator, "CURRENT_CAPACITY_INTERVAL", None)
+    if not isinstance(interval, int) and settings is not None:
+        try:
+            interval = getattr(settings, "CAPACITY_CHECK_INTERVAL", interval)
+        except Exception:
+            interval = None
     if not isinstance(interval, int):
         try:
             interval = int(os.environ.get("CAPACITY_CHECK_INTERVAL", "600"))
@@ -113,10 +135,28 @@ async def handle_admin(message: Any, parts: Any) -> None:
     if sub in ("status", "tila"):
         digest_time = _get_current_digest_time()
         capacity_interval = _get_current_capacity_interval()
-        pdga_thread = os.environ.get("DISCORD_PDGA_THREAD") or os.environ.get("DISCORD_THREAD_ID") or "(oletus)"
-        weekly_thread = os.environ.get("DISCORD_WEEKLY_THREAD") or os.environ.get("DISCORD_THREAD_ID") or "(oletus)"
-        discs_thread = os.environ.get("DISCORD_DISCS_THREAD") or os.environ.get("DISCORD_THREAD_ID") or "(oletus)"
-        capacity_thread = os.environ.get("CAPACITY_THREAD_ID") or os.environ.get("DISCORD_THREAD_ID") or "(oletus)"
+        # Prefer values from settings module when available
+        pdga_thread = None
+        weekly_thread = None
+        discs_thread = None
+        capacity_thread = None
+        try:
+            if settings is not None:
+                pdga_thread = getattr(settings, "DISCORD_PDGA_THREAD", None) or getattr(settings, "DISCORD_THREAD_ID", None)
+                weekly_thread = getattr(settings, "DISCORD_WEEKLY_THREAD_ID", None) or getattr(settings, "DISCORD_WEEKLY_THREAD", None)
+                discs_thread = getattr(settings, "DISCORD_DISCS_THREAD_ID", None) or getattr(settings, "DISCORD_DISCS_THREAD", None)
+                capacity_thread = getattr(settings, "CAPACITY_THREAD_ID", None)
+        except Exception:
+            pdga_thread = weekly_thread = discs_thread = capacity_thread = None
+        # fallback to environment / defaults
+        if not pdga_thread:
+            pdga_thread = os.environ.get("DISCORD_PDGA_THREAD") or os.environ.get("DISCORD_THREAD_ID") or "(oletus)"
+        if not weekly_thread:
+            weekly_thread = os.environ.get("DISCORD_WEEKLY_THREAD") or os.environ.get("DISCORD_THREAD_ID") or "(oletus)"
+        if not discs_thread:
+            discs_thread = os.environ.get("DISCORD_DISCS_THREAD") or os.environ.get("DISCORD_THREAD_ID") or "(oletus)"
+        if not capacity_thread:
+            capacity_thread = os.environ.get("CAPACITY_THREAD_ID") or os.environ.get("DISCORD_THREAD_ID") or "(oletus)"
 
         msg = (
             "Nykyiset botin asetukset:\n"
@@ -173,6 +213,17 @@ async def handle_admin(message: Any, parts: Any) -> None:
             # Päivitä myös ympäristömuuttujat, jotta seuraava käynnistys käyttää samaa aikaa
             os.environ["DAILY_DIGEST_HOUR"] = str(hour)
             os.environ["DAILY_DIGEST_MINUTE"] = f"{minute:02d}"
+            # Päivitä myös settings-moduuli, jos käytettävissä (juokseva konfiguraatio)
+            try:
+                if settings is not None:
+                    try:
+                        setattr(settings, "DAILY_DIGEST_HOUR", int(hour))
+                        setattr(settings, "DAILY_DIGEST_MINUTE", int(minute))
+                    except Exception:
+                        setattr(settings, "DAILY_DIGEST_HOUR", hour)
+                        setattr(settings, "DAILY_DIGEST_MINUTE", minute)
+            except Exception:
+                pass
             # Kirjaa muutos prosessin lokiin (sama konsoli kuin start_botin tulosteet)
             try:
                 print(f"[ADMIN] Päivitetty päivittäisen raportin kellonaika: {hour:02d}:{minute:02d}")
@@ -212,6 +263,24 @@ async def handle_admin(message: Any, parts: Any) -> None:
             return
 
         os.environ[env_name] = target_id
+        # Päivitä myös settings-moduulia, jos mahdollista
+        try:
+            if settings is not None:
+                kind_map = {
+                    "pdga": "DISCORD_THREAD_ID",
+                    "viikkarit": "DISCORD_WEEKLY_THREAD_ID",
+                    "rek": "DISCORD_THREAD_ID",
+                    "discs": "DISCORD_DISCS_THREAD_ID",
+                    "capacity": "CAPACITY_THREAD_ID",
+                }
+                attr = kind_map.get(kind)
+                if attr:
+                    try:
+                        setattr(settings, attr, int(target_id))
+                    except Exception:
+                        setattr(settings, attr, target_id)
+        except Exception:
+            pass
         # Kirjaa muutos prosessin lokiin
         try:
             print(f"[ADMIN] Asetettu {kind}-ilmoitusten kohdekanavaksi/säikeeksi ID {target_id} (env {env_name}).")

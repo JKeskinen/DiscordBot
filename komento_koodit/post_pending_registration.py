@@ -2,6 +2,16 @@ import os
 import json
 import requests
 import pathlib
+from datetime import datetime
+
+try:
+    import settings
+except Exception:
+    settings = None
+try:
+    from komento_koodit import check_capacity
+except Exception:
+    check_capacity = None
 
 
 def _load_dotenv(path='.env'):
@@ -26,19 +36,56 @@ PENDING_PATH = os.path.join(BASE_DIR, 'pending_registration.json')
 KNOWN_PDGA = os.path.join(BASE_DIR, 'known_pdga_competitions.json')
 KNOWN_WEEKLY = os.path.join(BASE_DIR, 'known_weekly_competitions.json')
 
+# Load optional precomputed capacity scan results to avoid live checks in posting
+CAPACITY_SCAN_PATH = os.path.join(BASE_DIR, 'CAPACITY_SCAN_RESULTS.json')
+CAPACITY_CACHE = {}
+try:
+    if os.path.exists(CAPACITY_SCAN_PATH):
+        with open(CAPACITY_SCAN_PATH, 'r', encoding='utf-8') as f:
+            _scan = json.load(f)
+            for rec in _scan:
+                key = rec.get('url') or rec.get('id')
+                if key:
+                    CAPACITY_CACHE[str(key)] = rec.get('capacity_result') or {}
+except Exception:
+    CAPACITY_CACHE = {}
+
 _load_dotenv()
-TOKEN = os.environ.get('DISCORD_TOKEN')
+TOKEN = None
+try:
+    if settings is not None:
+        TOKEN = getattr(settings, 'DISCORD_TOKEN', None)
+except Exception:
+    TOKEN = None
+if not TOKEN:
+    TOKEN = os.environ.get('DISCORD_TOKEN')
 
 # Testikanava, johon kaikki rekisteröinti-ilmoitukset ohjataan oletuksena.
-TEST_THREAD = os.environ.get('DISCORD_TEST_THREAD') or os.environ.get('DISCORD_TEST_CHANNEL_ID') or '1456702993377267905'
+TEST_THREAD = None
+try:
+    if settings is not None:
+        TEST_THREAD = getattr(settings, 'TEST_CHANNEL_ID', None) or getattr(settings, 'TEST_THREAD', None)
+except Exception:
+    TEST_THREAD = None
+if not TEST_THREAD:
+    TEST_THREAD = os.environ.get('DISCORD_TEST_THREAD') or os.environ.get('DISCORD_TEST_CHANNEL_ID') or '1456702993377267905'
 
 # Threads: PDGA and WEEKLY (viikkarit+doubles)
-# Ympäristömuuttujilla (DISCORD_PDGA_THREAD / DISCORD_WEEKLY_THREAD) voi myöhemmin ohjata
-# tuotantokanaville, mutta ilman niitä kaikki menee testikanavaan.
-PDGA_THREAD = os.environ.get('DISCORD_PDGA_THREAD') or os.environ.get('DISCORD_THREAD_ID') or TEST_THREAD
-WEEKLY_THREAD = os.environ.get('DISCORD_WEEKLY_THREAD') or os.environ.get('DISCORD_WEEKLY_THREAD_ID') or TEST_THREAD
+# Prefer explicit settings module values, then environment variables, then test thread.
+PDGA_THREAD = None
+WEEKLY_THREAD = None
+try:
+    if settings is not None:
+        PDGA_THREAD = getattr(settings, 'DISCORD_PDGA_THREAD', None) or getattr(settings, 'DISCORD_THREAD_ID', None)
+        WEEKLY_THREAD = getattr(settings, 'DISCORD_WEEKLY_THREAD_ID', None) or getattr(settings, 'DISCORD_WEEKLY_THREAD', None)
+except Exception:
+    PDGA_THREAD = WEEKLY_THREAD = None
+if not PDGA_THREAD:
+    PDGA_THREAD = os.environ.get('DISCORD_PDGA_THREAD') or os.environ.get('DISCORD_THREAD_ID') or TEST_THREAD
+if not WEEKLY_THREAD:
+    WEEKLY_THREAD = os.environ.get('DISCORD_WEEKLY_THREAD') or os.environ.get('DISCORD_WEEKLY_THREAD_ID') or TEST_THREAD
 
-HEADERS = {'Authorization': f'Bot {TOKEN}', 'Content-Type': 'application/json'}
+HEADERS = {'Authorization': f'Bot {TOKEN}' if TOKEN else '', 'Content-Type': 'application/json'}
 
 MAX_ITEMS_PER_EMBED = 12
 
@@ -79,19 +126,106 @@ def build_embeds_with_title(items, title, color):
             except Exception:
                 pass
             url = it.get('url') or ''
-            extra = ''
-            # include opens_in_days if present for 'opening soon' items
-            if it.get('opens_in_days') is not None and not it.get('registration_open'):
+            # build two-line block: name line, then date/capacity line, then an empty line
+            date_str = ''
+            cap_str = ''
+            opens_str = ''
+            # include date+time if available (normalize to DD.MM.YYYY HH:MM when time present)
+            try:
+                raw_dt = it.get('date')
+                if raw_dt:
+                    def _format_date_with_optional_time(s):
+                        fmt_date = '%d.%m.%Y'
+                        fmt_date_time = '%d.%m.%Y %H:%M'
+                        patterns = [
+                            ('%m/%d/%y %H:%M', True), ('%m/%d/%y', False),
+                            ('%d/%m/%Y %H:%M', True), ('%d/%m/%Y', False),
+                            ('%d.%m.%Y %H:%M', True), ('%d.%m.%Y', False),
+                            ('%Y-%m-%d %H:%M', True), ('%Y-%m-%d', False)
+                        ]
+                        for p, has_time in patterns:
+                            try:
+                                dt = datetime.strptime(s, p)
+                                return dt.strftime(fmt_date_time if has_time else fmt_date)
+                            except Exception:
+                                continue
+                        # fallback: extract first token and try heuristics
+                        try:
+                            token = str(s).split()[0]
+                            for sep in ('/', '.', '-'):
+                                if sep in token:
+                                    parts = token.split(sep)
+                                    if len(parts) >= 3:
+                                        a, b, c = parts[0], parts[1], parts[2]
+                                        if len(c) == 2:
+                                            c = '20' + c
+                                        # try common orders
+                                        for y, m, d in ((c, b, a), (c, a, b)):
+                                            try:
+                                                dt = datetime(int(y), int(m), int(d))
+                                                return dt.strftime(fmt_date)
+                                            except Exception:
+                                                pass
+                        except Exception:
+                            pass
+                        return str(s)
+                    date_str = _format_date_with_optional_time(str(raw_dt))
+            except Exception:
+                pass
+            # prepare name line (always present). If URL available, make name a Markdown link.
+            try:
+                if url:
+                    # Use markdown link format; Discord embed descriptions render these as clickable
+                    name_line = f"• [{name}]({url})"
+                else:
+                    name_line = f"• {name}"
+            except Exception:
+                name_line = f"• {name}"
+            # attempt to include capacity/player counts when possible
+            cap = None
+            # Prefer precomputed cache when available (use nightly scan results)
+            try:
+                cap = CAPACITY_CACHE.get(url) or CAPACITY_CACHE.get(str(it.get('id')))
+            except Exception:
+                cap = None
+
+            if not cap and check_capacity is not None and url:
                 try:
-                    d = int(it.get('opens_in_days'))
-                    if d > 0:
-                        extra = f" — avautuu {d} pv"  # Finnish: opens in X days
+                    cap = check_capacity.check_competition_capacity(url, timeout=6)
                 except Exception:
-                    pass
-            if url:
-                lines.append(f"• [{name}]({url}){extra}")
-            else:
-                lines.append(f"• {name}{extra}")
+                    cap = None
+
+            if isinstance(cap, dict):
+                reg = cap.get('registered')
+                lim = cap.get('limit')
+                rem = cap.get('remaining')
+                queued = cap.get('queued') or cap.get('queue') or cap.get('waiting') or 0
+                # prefer showing registered/limit when both known
+                if reg is not None and lim is not None:
+                    cap_str = f"{reg}/{lim}"
+                # if no registered players known but limit exists, show 0/limit
+                elif reg is None and lim is not None:
+                    cap_str = f"0/{lim}"
+                elif reg is not None and lim is None:
+                    cap_str = f"{reg}"
+                elif rem is not None:
+                    cap_str = f"jäljellä: {rem}"
+                # append queued/waitlist info if present
+                try:
+                    qn = int(queued) if queued is not None else 0
+                except Exception:
+                    qn = 0
+                if qn:
+                    if cap_str:
+                        cap_str = f"{cap_str} (+{qn} jonossa)"
+                    else:
+                        cap_str = f"jonossa: {qn}"
+            meta_parts = [p for p in (date_str, cap_str, opens_str) if p]
+            meta_line = ('  ' + ' — '.join(meta_parts)) if meta_parts else ''
+            lines.append(name_line)
+            if meta_line:
+                lines.append(meta_line)
+            lines.append('')
         embed = {'title': first_title, 'description': '\n'.join(lines), 'color': color}
         embeds.append(embed)
         first_title = ' '
@@ -169,8 +303,26 @@ if __name__ == '__main__':
             weekly.append(it)
 
     # Load known caches
+    # Allow settings to override file locations
+    try:
+        if settings is not None:
+            KNOWN_PDGA = os.path.join(BASE_DIR, getattr(settings, 'CACHE_FILE', os.path.basename(KNOWN_PDGA)))
+            KNOWN_WEEKLY = os.path.join(BASE_DIR, getattr(settings, 'KNOWN_WEEKLY_FILE', os.path.basename(KNOWN_WEEKLY)))
+            PENDING_PATH = os.path.join(BASE_DIR, getattr(settings, 'REG_CHECK_FILE', os.path.basename(PENDING_PATH)))
+    except Exception:
+        pass
+
     known_pdga = load_known(KNOWN_PDGA)
     known_weekly = load_known(KNOWN_WEEKLY)
+
+    # Allow forcing posts for debugging by setting environment variable FORCE_POST=1
+    try:
+        if os.environ.get('FORCE_POST') == '1':
+            print('FORCE_POST active: ignoring known caches')
+            known_pdga = set()
+            known_weekly = set()
+    except Exception:
+        pass
 
     # Determine new items
     pdga_ids = [str(it.get('id') or it.get('url') or it.get('name')) for it in pdga]
@@ -190,6 +342,11 @@ if __name__ == '__main__':
         # Post open now
         if pdga_open:
             embeds = build_embeds_with_title(pdga_open, f"REKISTERÖINTI AVOINNA ({len(pdga_open)})", 5763714)
+            try:
+                if os.environ.get('FORCE_POST') == '1':
+                    print('PDGA embeds preview:', json.dumps(embeds, ensure_ascii=False)[:2000])
+            except Exception:
+                pass
             if post_embeds(PDGA_THREAD, embeds):
                 print(f'Posted PDGA open now: {len(pdga_open)} items')
             else:
@@ -217,6 +374,11 @@ if __name__ == '__main__':
 
         if weekly_open:
             embeds = build_embeds_with_title(weekly_open, f"REKISTERÖINTI AVOINNA ({len(weekly_open)})", 5763714)
+            try:
+                if os.environ.get('FORCE_POST') == '1':
+                    print('WEEKLY embeds preview:', json.dumps(embeds, ensure_ascii=False)[:2000])
+            except Exception:
+                pass
             if post_embeds(WEEKLY_THREAD, embeds):
                 print(f'Posted weekly open now: {len(weekly_open)} items')
             else:

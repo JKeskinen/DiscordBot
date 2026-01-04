@@ -8,6 +8,7 @@ import re
 import csv
 from datetime import datetime, date, timedelta
 from typing import Optional
+import traceback
 
 # Module base dir
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
@@ -30,28 +31,34 @@ except Exception:
     # if python-dotenv not installed, ignore at runtime
     pass
 
-# Configuration copied from metrixbot.py
-DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN")
+# Load optional project settings from `settings.py` (if present). Settings may
+# override environment variables for convenient local configuration.
+try:
+    import settings as S  # type: ignore
+except Exception:
+    S = None
+
+# Configuration values (fall back to env when not provided in settings)
+DISCORD_TOKEN = getattr(S, 'DISCORD_TOKEN', os.environ.get('DISCORD_TOKEN'))
 
 # Primary channel and thread IDs (fall back to env overrides)
-# Testikanava, johon kaikki uudet ilmoitukset ohjataan oletuksena:
-TEST_CHANNEL_ID = os.environ.get("DISCORD_TEST_CHANNEL_ID", "1456702993377267905")
+TEST_CHANNEL_ID = getattr(S, 'TEST_CHANNEL_ID', os.environ.get('DISCORD_TEST_CHANNEL_ID', '1456702993377267905'))
 
-DISCORD_CHANNEL_ID = int(os.environ.get("DISCORD_CHANNEL_ID", TEST_CHANNEL_ID))
-DISCORD_THREAD_ID = int(os.environ.get("DISCORD_THREAD_ID", TEST_CHANNEL_ID))
-DISCORD_WEEKLY_THREAD_ID = int(os.environ.get("DISCORD_WEEKLY_THREAD_ID", TEST_CHANNEL_ID))
-DISCORD_DISCS_THREAD_ID = os.environ.get("DISCORD_DISCS_THREAD", TEST_CHANNEL_ID)
+DISCORD_CHANNEL_ID = int(getattr(S, 'DISCORD_CHANNEL_ID', os.environ.get('DISCORD_CHANNEL_ID', TEST_CHANNEL_ID)))
+DISCORD_THREAD_ID = int(getattr(S, 'DISCORD_THREAD_ID', os.environ.get('DISCORD_THREAD_ID', TEST_CHANNEL_ID)))
+DISCORD_WEEKLY_THREAD_ID = int(getattr(S, 'DISCORD_WEEKLY_THREAD_ID', os.environ.get('DISCORD_WEEKLY_THREAD_ID', TEST_CHANNEL_ID)))
+DISCORD_DISCS_THREAD_ID = getattr(S, 'DISCORD_DISCS_THREAD_ID', os.environ.get('DISCORD_DISCS_THREAD', TEST_CHANNEL_ID))
 
-WEEKLY_JSON = os.environ.get("WEEKLY_JSON", "weekly_pair.json")
-WEEKLY_LOCATION = os.environ.get("WEEKLY_LOCATION", "Etelä-Pohjanmaa").strip().lower()
-WEEKLY_RADIUS_KM = int(os.environ.get("WEEKLY_RADIUS_KM", "100"))
-WEEKLY_SEARCH_URL = os.environ.get("WEEKLY_SEARCH_URL", "https://discgolfmetrix.com/?u=competitions_all&view=1&competition_name=&period=&date1=2026-01-01&date2=2027-01-01&my_country=&registration_open=&registration_date1=&registration_date2=&country_code=FI&my_club=0&club_type=&club_id=&association_id=0&close_to_me=&area=Etelä-Pohjanmaa&city=&course_id=&division=&my=&view=1&sort_name=&sort_order=&my_all=&from=1&to=30")
+WEEKLY_JSON = getattr(S, 'WEEKLY_JSON', os.environ.get('WEEKLY_JSON', 'weekly_pair.json'))
+WEEKLY_LOCATION = getattr(S, 'WEEKLY_LOCATION', os.environ.get('WEEKLY_LOCATION', 'Etelä-Pohjanmaa')).strip().lower()
+WEEKLY_RADIUS_KM = int(getattr(S, 'WEEKLY_RADIUS_KM', os.environ.get('WEEKLY_RADIUS_KM', '100')))
+WEEKLY_SEARCH_URL = getattr(S, 'WEEKLY_SEARCH_URL', os.environ.get('WEEKLY_SEARCH_URL', ''))
 
-METRIX_URL = os.environ.get("METRIX_URL", "https://discgolfmetrix.com/?u=competitions_all&view=2&competition_name=&period=&date1=2026-01-01&date2=2027-01-01&my_country=&registration_open=&registration_date1=&registration_date2=&country_code=FI&my_club=&club_type=&club_id=&association_id=0&close_to_me=&area=&city=&course_id=&type=C&division=&my=&view=2&sort_name=&sort_order=&my_all=")
+METRIX_URL = getattr(S, 'METRIX_URL', os.environ.get('METRIX_URL', ''))
 
-AUTO_LIST_INTERVAL = int(os.environ.get('AUTO_LIST_INTERVAL', '86400'))
-CHECK_INTERVAL = int(os.environ.get('CHECK_INTERVAL', '600'))
-CHECK_REGISTRATION_INTERVAL = int(os.environ.get('CHECK_REGISTRATION_INTERVAL', '3600'))
+AUTO_LIST_INTERVAL = int(getattr(S, 'AUTO_LIST_INTERVAL', os.environ.get('AUTO_LIST_INTERVAL', '86400')))
+CHECK_INTERVAL = int(getattr(S, 'CHECK_INTERVAL', os.environ.get('CHECK_INTERVAL', '600')))
+CHECK_REGISTRATION_INTERVAL = int(getattr(S, 'CHECK_REGISTRATION_INTERVAL', os.environ.get('CHECK_REGISTRATION_INTERVAL', '3600')))
 CURRENT_CAPACITY_INTERVAL = CHECK_INTERVAL
 
 # Päivittäisen digestin viimeisin ajopäivä (päivitetään daemon-loopissa).
@@ -60,33 +67,28 @@ CURRENT_CAPACITY_INTERVAL = CHECK_INTERVAL
 # uuteen kellonaikaan.
 LAST_DIGEST_DATE: Optional[date] = None
 
+# Prevent concurrent run_once invocations from different threads
+RUN_ONCE_LOCK = None
+
 # Päivittäisen kilpailudigestin (PDGA + viikkarit + rekisteröinnit) kellonaika.
 # Voit muuttaa näitä esim. .env-tiedostossa: DAILY_DIGEST_HOUR=4, DAILY_DIGEST_MINUTE=0
-# Oletusarvo ajettu klo 04:00:00
-DAILY_DIGEST_HOUR = int(os.environ.get('DAILY_DIGEST_HOUR', '4'))  # 0-23
-DAILY_DIGEST_MINUTE = int(os.environ.get('DAILY_DIGEST_MINUTE', '00'))  # 0-59
+DAILY_DIGEST_HOUR = int(getattr(S, 'DAILY_DIGEST_HOUR', os.environ.get('DAILY_DIGEST_HOUR', '4')))
+DAILY_DIGEST_MINUTE = int(getattr(S, 'DAILY_DIGEST_MINUTE', os.environ.get('DAILY_DIGEST_MINUTE', '00')))
 
-CACHE_FILE = os.environ.get('CACHE_FILE', 'known_pdga_competitions.json')
-REG_CHECK_FILE = os.environ.get('REG_CHECK_FILE', 'pending_registration.json')
-KNOWN_WEEKLY_FILE = os.environ.get('KNOWN_WEEKLY_FILE', 'known_weekly_competitions.json')
-KNOWN_DOUBLES_FILE = os.environ.get('KNOWN_DOUBLES_FILE', 'known_doubles_competitions.json')
-KNOWN_PDGA_DISCS_FILE = os.environ.get('KNOWN_PDGA_DISCS_FILE', 'known_pdga_discs_specs.json')
+CACHE_FILE = getattr(S, 'CACHE_FILE', os.environ.get('CACHE_FILE', 'known_pdga_competitions.json'))
+REG_CHECK_FILE = getattr(S, 'REG_CHECK_FILE', os.environ.get('REG_CHECK_FILE', 'pending_registration.json'))
+KNOWN_WEEKLY_FILE = getattr(S, 'KNOWN_WEEKLY_FILE', os.environ.get('KNOWN_WEEKLY_FILE', 'known_weekly_competitions.json'))
+KNOWN_DOUBLES_FILE = getattr(S, 'KNOWN_DOUBLES_FILE', os.environ.get('KNOWN_DOUBLES_FILE', 'known_doubles_competitions.json'))
+KNOWN_PDGA_DISCS_FILE = getattr(S, 'KNOWN_PDGA_DISCS_FILE', os.environ.get('KNOWN_PDGA_DISCS_FILE', 'known_pdga_discs_specs.json'))
 
 # -------------------------
 # Discord message formatting options
-# You can tweak these values here or set equivalent env vars to change behaviour.
-# - To remove dates from messages, set DISCORD_SHOW_DATE=0
-# - To change date output to DDMMYYYY, set DISCORD_DATE_FORMAT=DDMMYYYY
-# - To show/hide raw IDs, set DISCORD_SHOW_ID=1 or 0
-# - To show/hide location, set DISCORD_SHOW_LOCATION=1 or 0
-# - To increase spacing between lines in messages, set DISCORD_LINE_SPACING to 1 (single), 2 (double), etc.
-# Note: Discord does not support changing font size. Use spacing, bold or emojis to increase visual weight.
 # -------------------------
-DISCORD_SHOW_DATE = os.environ.get('DISCORD_SHOW_DATE', '1') == '1'
-DISCORD_DATE_FORMAT = os.environ.get('DISCORD_DATE_FORMAT', 'DD.MM.YYYY')  # or 'original'
-DISCORD_SHOW_ID = os.environ.get('DISCORD_SHOW_ID', '0') == '1'
-DISCORD_SHOW_LOCATION = os.environ.get('DISCORD_SHOW_LOCATION', '0') == '1'
-DISCORD_LINE_SPACING = max(1, int(os.environ.get('DISCORD_LINE_SPACING', '1')))
+DISCORD_SHOW_DATE = getattr(S, 'DISCORD_SHOW_DATE', os.environ.get('DISCORD_SHOW_DATE', '1')) == '1'
+DISCORD_DATE_FORMAT = getattr(S, 'DISCORD_DATE_FORMAT', os.environ.get('DISCORD_DATE_FORMAT', 'DD.MM.YYYY'))
+DISCORD_SHOW_ID = getattr(S, 'DISCORD_SHOW_ID', os.environ.get('DISCORD_SHOW_ID', '0')) == '1'
+DISCORD_SHOW_LOCATION = getattr(S, 'DISCORD_SHOW_LOCATION', os.environ.get('DISCORD_SHOW_LOCATION', '0')) == '1'
+DISCORD_LINE_SPACING = max(1, int(getattr(S, 'DISCORD_LINE_SPACING', os.environ.get('DISCORD_LINE_SPACING', '1'))))
 
 def _format_date_field(raw_date: str) -> str:
     """Try to extract a date like MM/DD/YY or MM/DD/YYYY from raw_date and
@@ -132,16 +134,26 @@ def post_to_discord(thread_id: str, token: str, content: str) -> bool:
     url = f'https://discord.com/api/v10/channels/{thread_id}/messages'
     headers = {'Authorization': f'Bot {token}', 'Content-Type': 'application/json'}
     payload = {'content': content}
+    # Verbose logging
     try:
+        safe_token = token[:6] + '...' if token else '(none)'
+        print(f'[POST] Discord -> url={url} thread={thread_id} token={safe_token} payload_len={len(content)}')
         r = requests.post(url, headers=headers, json=payload, timeout=15)
+        print(f'[POST] Response status: {r.status_code}')
+        try:
+            txt = r.text
+            print(f'[POST] Response text (truncated): {txt[:400]}')
+        except Exception:
+            pass
         if r.status_code in (200, 201):
             print('Posted summary to Discord thread', thread_id)
             return True
         else:
-            print('Discord post failed:', r.status_code, r.text[:200])
+            print('Discord post failed:', r.status_code)
             return False
     except Exception as e:
         print('Discord post exception:', e)
+        traceback.print_exc()
         return False
 
 
@@ -154,12 +166,19 @@ def post_embeds_to_discord(thread_id: str, token: str, embeds: list) -> bool:
     headers = {'Authorization': f'Bot {token}', 'Content-Type': 'application/json'}
     payload = {'embeds': embeds}
     try:
+        safe_token = token[:6] + '...' if token else '(none)'
+        print(f'[POST-EMBED] Discord -> url={url} thread={thread_id} token={safe_token} embeds={len(embeds)}')
         r = requests.post(url, headers=headers, json=payload, timeout=15)
+        print(f'[POST-EMBED] Response status: {r.status_code}')
+        try:
+            print(f'[POST-EMBED] Response text (truncated): {r.text[:400]}')
+        except Exception:
+            pass
         if r.status_code in (200, 201):
             print('Posted embeds to Discord thread', thread_id)
             return True
         else:
-            print('Embed post failed, status', r.status_code, r.text[:200])
+            print('Embed post failed, status', r.status_code)
             # fallback: try to post plain text combining embed descriptions
             try:
                 combined = []
@@ -167,11 +186,15 @@ def post_embeds_to_discord(thread_id: str, token: str, embeds: list) -> bool:
                     title = e.get('title', '')
                     desc = e.get('description', '')
                     combined.append(f"**{title}**\n{desc}")
+                print('[POST-EMBED] Falling back to plain text post')
                 return post_to_discord(thread_id, token, "\n\n".join(combined))
-            except Exception:
+            except Exception as e:
+                print('Fallback post exception:', e)
+                traceback.print_exc()
                 return False
     except Exception as e:
         print('Discord embed post exception:', e)
+        traceback.print_exc()
         return False
 
 
@@ -245,7 +268,15 @@ def post_startup_capacity_alerts(base_dir: str, token: Optional[str]):
         })
 
     # Post to configured thread (use CAPACITY_THREAD_ID, DISCORD_THREAD_ID or DISCORD_CHANNEL_ID)
-    target = os.environ.get('CAPACITY_THREAD_ID') or os.environ.get('DISCORD_THREAD_ID') or os.environ.get('DISCORD_CHANNEL_ID')
+    # Resolve target using settings override, then environment
+    target = None
+    try:
+        if S is not None:
+            target = getattr(S, 'CAPACITY_THREAD_ID', None) or getattr(S, 'DISCORD_THREAD_ID', None) or getattr(S, 'DISCORD_CHANNEL_ID', None)
+    except Exception:
+        target = None
+    if not target:
+        target = os.environ.get('CAPACITY_THREAD_ID') or os.environ.get('DISCORD_THREAD_ID') or os.environ.get('DISCORD_CHANNEL_ID')
     if not target:
         print('No thread/channel configured for capacity alerts; skipping post')
         return
@@ -271,6 +302,16 @@ def post_startup_capacity_alerts(base_dir: str, token: Optional[str]):
         print('Exception posting startup capacity summary:', e)
 def run_once():
     # Import modules from komento_koodit (entinen hyvat_koodit)
+    global RUN_ONCE_LOCK
+    if RUN_ONCE_LOCK is None:
+        try:
+            RUN_ONCE_LOCK = threading.Lock()
+        except Exception:
+            RUN_ONCE_LOCK = None
+    # If another thread/process is running run_once, skip this invocation
+    if RUN_ONCE_LOCK is not None and not RUN_ONCE_LOCK.acquire(blocking=False):
+        print('run_once already in progress; skipping duplicate invocation')
+        return
     import komento_koodit.search_pdga_sfl as pdga_mod
     # Import tulokset module for competition result parsing and club detection
     import komento_koodit.commands_tulokset as tulokset_mod
@@ -1304,6 +1345,13 @@ def _run_registration_check_once(base_dir, out_path=None):
     except Exception as e:
         print('Failed to post pending registrations via post_mod:', e)
 
+    # Ensure lock released
+    try:
+        if RUN_ONCE_LOCK is not None and RUN_ONCE_LOCK.locked():
+            RUN_ONCE_LOCK.release()
+    except Exception:
+        pass
+
 
 def start_registration_worker(base_dir, interval_seconds: int):
     def worker():
@@ -1504,6 +1552,43 @@ def start_pdga_discs_worker(base_dir, interval_seconds: int):
     return t
 
 
+def start_nightly_capacity_scan(hour: int = 3, minute: int = 0):
+    """Start a background thread that runs `_run_capacity_scan_and_alerts_once` at the given hour:minute daily.
+
+    The thread is a daemon and will not block process exit. It will run immediately if the next
+    scheduled time is within a minute.
+    """
+    def worker():
+        while True:
+            try:
+                now = datetime.now()
+                # compute next run datetime
+                next_run = datetime(now.year, now.month, now.day, hour, minute)
+                if next_run <= now:
+                    next_run = next_run + timedelta(days=1)
+                wait_seconds = (next_run - now).total_seconds()
+                # sleep until next run (but wake up periodically to handle signals)
+                slept = 0
+                while slept < wait_seconds:
+                    to_sleep = min(60, wait_seconds - slept)
+                    time.sleep(max(1, to_sleep))
+                    slept += to_sleep
+
+                print(f'[NIGHTLY] Running capacity scan at {datetime.now():%Y-%m-%d %H:%M}')
+                try:
+                    _run_capacity_scan_and_alerts_once(BASE_DIR)
+                except Exception as e:
+                    print('Nightly capacity scan failed:', e)
+                # loop continues and will schedule next day
+            except Exception as e:
+                print('Nightly capacity scan thread exception:', e)
+                time.sleep(60)
+
+    t = threading.Thread(target=worker, daemon=True)
+    t.start()
+    return t
+
+
 def start_daily_scheduler_thread(hour: int, minute: int, interval_minutes: float = 5.0):
     """Start a background thread that runs `run_once()` once per day after the given hour:minute.
 
@@ -1601,6 +1686,13 @@ def main():
                 if args.presence and not args.daemon:
                     try:
                         start_daily_scheduler_thread(DAILY_DIGEST_HOUR, DAILY_DIGEST_MINUTE)
+                        # also start nightly capacity prefetch thread
+                        try:
+                            nh = int(os.environ.get('CAPACITY_NIGHT_HOUR', '3'))
+                            nm = int(os.environ.get('CAPACITY_NIGHT_MINUTE', '0'))
+                            start_nightly_capacity_scan(nh, nm)
+                        except Exception:
+                            pass
                     except Exception as e:
                         print('Failed to start daily scheduler thread:', e)
 
@@ -1673,6 +1765,13 @@ def main():
             CURRENT_CAPACITY_INTERVAL = cap_interval
         except Exception as e:
             print('Failed to start capacity worker:', e)
+        # start nightly capacity prefetch (03:00 by default)
+        try:
+            nh = int(os.environ.get('CAPACITY_NIGHT_HOUR', '3'))
+            nm = int(os.environ.get('CAPACITY_NIGHT_MINUTE', '0'))
+            start_nightly_capacity_scan(nh, nm)
+        except Exception:
+            pass
         # start PDGA discs watcher worker thread (default once per day)
         try:
             discs_interval = int(os.environ.get('DISCS_CHECK_INTERVAL', '86400'))

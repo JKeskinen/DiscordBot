@@ -1,16 +1,5 @@
 [
   {
-    "id": "3500547",
-    "title": "SFL MASTERS TOUR VIISARI BY RIEPPO SERVICE OY",
-    "url": "https://discgolfmetrix.com/3500547",
-    "registered": 55,
-    "limit": 72,
-    "remaining": 17,
-    "remaining_percent": 23.6,
-    "level": 25,
-    "note": "metrix-reg-table"
-  },
-  {
     "id": "3512042",
     "title": "NBDG Winter Tour™ Powered by Valostore → #6 Iitti",
     "url": "https://discgolfmetrix.com/3512042",
@@ -25,10 +14,10 @@
     "id": "3515259",
     "title": "NBDG Amateurs™ Lemmenlaakso",
     "url": "https://discgolfmetrix.com/3515259",
-    "registered": 47,
+    "registered": 49,
     "limit": 72,
-    "remaining": 25,
-    "remaining_percent": 34.7,
+    "remaining": 23,
+    "remaining_percent": 31.9,
     "level": 50,
     "note": "metrix-reg-table"
   }

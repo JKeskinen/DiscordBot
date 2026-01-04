@@ -24,7 +24,7 @@
     "title": "Jämsän Frisbeegolf - Talvicup 2026",
     "tier": "Weekly",
     "date": "01/04/26 - 03/22/26",
-    "location": "Players: 10",
+    "location": "Players: 12",
     "kind": "VIIKKOKISA",
     "url": "https://discgolfmetrix.com/3521723",
     "area": "Keski-Suomi"
@@ -43,8 +43,8 @@
     "id": "3522203",
     "title": "2026  Muuratharjun viikkokilpailut",
     "tier": "Weekly",
-    "date": "01/04/26",
-    "location": "Muuratharju frisbee → Muuratharju talvikisarata",
+    "date": "01/04/26 - 01/11/26",
+    "location": "Players: 5",
     "kind": "VIIKKOKISA",
     "url": "https://discgolfmetrix.com/3522203",
     "area": "Keski-Suomi"
@@ -64,9 +64,19 @@
     "title": "JyLin talvikisat 2025-2026",
     "tier": "",
     "date": "01/04/26 - 03/22/26",
-    "location": "Players: 21",
+    "location": "Players: 22",
     "kind": "VIIKKOKISA",
     "url": "https://discgolfmetrix.com/3523266",
+    "area": "Keski-Suomi"
+  },
+  {
+    "id": "3524352",
+    "title": "Ääneseudun ledipelit 2025-2026 → 39. Kierros Jäädytään pakkaseen",
+    "tier": "",
+    "date": "01/04/26 18:00",
+    "location": "Äänekoski, Laajalahden Talvirata → Laajalahti LED 2024-25 -> 20 väylää",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3524352",
     "area": "Keski-Suomi"
   },
   {
@@ -100,6 +110,16 @@
     "area": "Keski-Suomi"
   },
   {
+    "id": "3524534",
+    "title": "ÄKI DG viikkokisat Laajalahti → 10. Kierros",
+    "tier": "Weekly",
+    "date": "01/10/26 12:00",
+    "location": "Äänekoski, Laajalahden Talvirata → Laajalahti 2024-25 -> 20 väylää",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3524534",
+    "area": "Keski-Suomi"
+  },
+  {
     "id": "3521729",
     "title": "Jämsän Frisbeegolf - Talvicup 2026 → Kisa 2",
     "tier": "Weekly",
@@ -107,6 +127,16 @@
     "location": "Myllymäki talvirata → 25-26 layout",
     "kind": "VIIKKOKISA",
     "url": "https://discgolfmetrix.com/3521729",
+    "area": "Keski-Suomi"
+  },
+  {
+    "id": "3524491",
+    "title": "2026  Muuratharjun viikkokilpailut → 2. Kierros",
+    "tier": "Weekly",
+    "date": "01/11/26 12:00",
+    "location": "Muuratharju frisbee → Muuratharju talvikisarata",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3524491",
     "area": "Keski-Suomi"
   },
   {
@@ -121,7 +151,7 @@
   },
   {
     "id": "3523544",
-    "title": "Mäntän viikkokisat 2025 + talvi -26 → Viikkokisat vko 1",
+    "title": "Mäntän viikkokisat 2025 + talvi -26 → Viikkokisat vko 1 PERUTTU",
     "tier": "Weekly",
     "date": "01/04/26 13:00",
     "location": "Mäntän frisbeegolfrata → 18 Pitkät korit 2x9 väylää",
@@ -140,6 +170,26 @@
     "area": "Pirkanmaa"
   },
   {
+    "id": "3524307",
+    "title": "Winter Series 2025-2026 Pirkanmaa → Orivesi - Orivesi DGP → 1. kierros",
+    "tier": "",
+    "date": "01/04/26 09:30",
+    "location": "Orivesi DiscGolfPark → Orivesi DGP talvi 25-26",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3524307",
+    "area": "Pirkanmaa"
+  },
+  {
+    "id": "3524374",
+    "title": "Winter Series 2025-2026 Pirkanmaa → Orivesi - Orivesi DGP → 2. kierros",
+    "tier": "",
+    "date": "01/04/26 12:45",
+    "location": "Orivesi DiscGolfPark → Orivesi DGP talvi 25-26",
+    "kind": "VIIKKOKISA",
+    "url": "https://discgolfmetrix.com/3524374",
+    "area": "Pirkanmaa"
+  },
+  {
     "id": "3524251",
     "title": "VLKDG Talvikisat 2025-2026 → VLKDG Talvikisat 2025-2026 # 8 Eerola → Kierros 1",
     "tier": "",
@@ -153,7 +203,7 @@
     "id": "3524252",
     "title": "VLKDG Talvikisat 2025-2026 → VLKDG Talvikisat 2025-2026 # 8 Eerola → Kierros 2",
     "tier": "",
-    "date": "01/04/26 12:20",
+    "date": "01/04/26 12:20 Golfstart",
     "location": "Valkeakoski DiscGolfPark → Vlkdg Eerola talvi 2025-2026",
     "kind": "VIIKKOKISA",
     "url": "https://discgolfmetrix.com/3524252",

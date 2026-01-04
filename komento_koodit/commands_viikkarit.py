@@ -3,6 +3,14 @@ import asyncio
 from datetime import datetime, date, timedelta
 from .date_utils import normalize_date_string
 from typing import Any, List
+try:
+    import settings
+except Exception:
+    settings = None
+
+# Defaults that may be overridden by settings.py
+DEFAULT_WEEKLY_LOCATION = getattr(settings, 'WEEKLY_LOCATION', 'Etelä-Pohjanmaa') if settings is not None else 'Etelä-Pohjanmaa'
+DEFAULT_MAX_WEEKLY_ITEMS = int(getattr(settings, 'DEFAULT_MAX_WEEKLY_LIST', 40)) if settings is not None else 40
 
 try:
     import discord  # type: ignore[import]
@@ -171,7 +179,8 @@ async def handle_viikkarit(message: Any, parts: Any) -> None:
     else:
         category_name = "VIIKKOKISA"
         filename = "VIIKKOKISA.json"
-        title_suffix = " – Etelä-Pohjanmaa"
+        # Use configured default location name when composing title
+        title_suffix = f" – {DEFAULT_WEEKLY_LOCATION}"
 
     # Ladataan keskitetystä data_storesta, jos mahdollista.
     entries: list[dict]
@@ -315,7 +324,7 @@ async def handle_viikkarit(message: Any, parts: Any) -> None:
     week_entries.sort(key=lambda t: t[0])
 
     # Rajataan pitkiä listoja, jottei yhdelle viikolle tule satoja rivejä.
-    max_items = 40
+    max_items = DEFAULT_MAX_WEEKLY_ITEMS
     omitted_count = 0
     if mode in ("suomi", "seutu") and len(week_entries) > max_items:
         omitted_count = len(week_entries) - max_items
