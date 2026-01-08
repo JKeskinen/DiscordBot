@@ -2,6 +2,7 @@
 import os
 import json
 from komento_koodit.check_capacity import scan_pdga_for_tjing, fetch_tjing_capacity
+from komento_koodit import data_store
 
 BASE = os.path.abspath(os.path.dirname(__file__))
 TJ_REG = os.path.join(BASE, 'TJING_REGISTRATIONS.json')
@@ -10,13 +11,9 @@ OUT = os.path.join(BASE, 'TJING_CAPACITY.json')
 
 def main():
     # prefer existing registrations file if present
-    if os.path.exists(TJ_REG):
-        try:
-            with open(TJ_REG, 'r', encoding='utf-8') as f:
-                regs = json.load(f)
-        except Exception:
-            regs = scan_pdga_for_tjing()
-    else:
+    # prefer existing registrations from sqlite-backed store (fallback to file)
+    regs = data_store.load_category(os.path.basename(TJ_REG))
+    if not regs:
         regs = scan_pdga_for_tjing()
 
     # dedupe by tjing url
@@ -50,8 +47,7 @@ def main():
         })
 
     try:
-        with open(OUT, 'w', encoding='utf-8') as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
+        data_store.save_category(os.path.basename(OUT), results)
     except Exception:
         pass
 

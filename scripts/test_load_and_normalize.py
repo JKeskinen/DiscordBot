@@ -1,9 +1,9 @@
 import os, json
 from komento_koodit.date_utils import normalize_date_string
+from komento_koodit import data_store
 root = os.path.abspath('.')
 fname = 'known_weekly_competitions.json'
-with open(os.path.join(root, fname), 'r', encoding='utf-8') as f:
-    data = json.load(f)
+data = data_store.load_category(fname)
 entries = []
 for item in data:
     if isinstance(item, dict):

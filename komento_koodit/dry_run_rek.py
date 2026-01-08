@@ -5,8 +5,16 @@ import re
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 PENDING = os.path.join(ROOT, 'pending_registration.json')
 
-with open(PENDING, 'r', encoding='utf-8') as f:
-    entries = json.load(f)
+try:
+    from komento_koodit import data_store
+except Exception:
+    data_store = None
+
+if data_store is not None:
+    entries = data_store.load_category('pending_registration') or []
+else:
+    with open(PENDING, 'r', encoding='utf-8') as f:
+        entries = json.load(f)
 
 lines = []
 for e in entries:

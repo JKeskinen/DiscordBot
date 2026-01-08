@@ -7,8 +7,8 @@ from komento_koodit import check_capacity as cc
 
 
 def main():
-    with open('pending_registration.json', 'r', encoding='utf-8') as f:
-        pending = json.load(f)
+    from komento_koodit import data_store
+    pending = data_store.load_category('pending_registration')
 
     results = []
 
@@ -79,15 +79,73 @@ def main():
                             pass
         except Exception:
             pass
+        # Attempt to extract per-class definitions and per-class counts (Metrix pages)
+        try:
+            # if check_capacity already returned class_info, preserve it
+            if not res_record.get('capacity_result'):
+                res_record['capacity_result'] = res
+            if 'class_info' not in res_record.get('capacity_result', {}):
+                class_info = None
+                # first try static parse from the fetched soup (if available)
+                try:
+                    if 'soup' in locals() and getattr(cc, '_parse_metrix_classes_and_counts', None):
+                        class_info = cc._parse_metrix_classes_and_counts(soup) or None
+                except Exception:
+                    class_info = None
+                # fallback: attempt rendered DOM via Playwright if no useful class_info
+                if (not class_info or not (class_info.get('classes') or class_info.get('class_counts'))) and getattr(cc, 'sync_playwright', None) is not None:
+                    try:
+                        with cc.sync_playwright() as p:
+                            browser = p.chromium.launch(headless=True)
+                            page = browser.new_page()
+                            page.goto(url, timeout=8000)
+                            content = page.content()
+                            browser.close()
+                        try:
+                            from bs4 import BeautifulSoup as _BS
+                            rendered = _BS(content or '', 'html.parser')
+                            rc = cc._parse_metrix_classes_and_counts(rendered)
+                            if rc:
+                                class_info = rc
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                if class_info:
+                    # Only keep per-event class counts (not full definitions).
+                    # The canonical class definitions are stored separately in
+                    # `class_definitions.json` and consumers should reference it.
+                    counts = None
+                    try:
+                        if isinstance(class_info, dict):
+                            counts = class_info.get('class_counts')
+                    except Exception:
+                        counts = None
+                    if counts:
+                        try:
+                            res_record['capacity_result']['class_counts'] = counts
+                        except Exception:
+                            res_record['capacity_result'] = dict(res_record.get('capacity_result') or {})
+                            res_record['capacity_result']['class_counts'] = counts
+                        # also expose at top-level for convenience
+                        res_record['class_counts'] = counts
+        except Exception:
+            pass
         results.append(res_record)
         # be polite
         time.sleep(0.25)
 
     out_name = 'CAPACITY_SCAN_RESULTS.json'
-    with open(out_name, 'w', encoding='utf-8') as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
-
-    print(f"Saved {len(results)} results to {out_name}")
+    output = {
+        'class_definitions': 'class_definitions.json',
+        'results': results,
+    }
+    from komento_koodit import data_store
+    data_store.save_category(out_name, output)
+    try:
+        print(f"Saved {len(results)} results to sqlite via data_store as {os.path.splitext(out_name)[0]}")
+    except Exception:
+        print("Saved results to sqlite via data_store")
 
 
 if __name__ == '__main__':

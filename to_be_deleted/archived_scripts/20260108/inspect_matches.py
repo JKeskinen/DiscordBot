@@ -1,5 +1,6 @@
 import os, json, re
 from komento_koodit.date_utils import normalize_date_string
+from komento_koodit import data_store
 
 ROOT = os.path.abspath('.')
 candidate_files = [
@@ -12,26 +13,25 @@ candidate_files = [
 ]
 entries = []
 for fname in candidate_files:
-    path = os.path.join(ROOT, fname)
-    if os.path.exists(path):
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                for item in data:
+    data = data_store.load_category(fname)
+    if not data:
+        continue
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                item['_src_file'] = fname
+            entries.append(item)
+    elif isinstance(data, dict):
+        for v in data.values():
+            if isinstance(v, list):
+                for item in v:
                     if isinstance(item, dict):
                         item['_src_file'] = fname
                     entries.append(item)
-            elif isinstance(data, dict):
-                for v in data.values():
-                    if isinstance(v, list):
-                        for item in v:
-                            if isinstance(item, dict):
-                                item['_src_file'] = fname
-                            entries.append(item)
-                    else:
-                        if isinstance(v, dict):
-                            v['_src_file'] = fname
-                        entries.append(v)
+            else:
+                if isinstance(v, dict):
+                    v['_src_file'] = fname
+                entries.append(v)
 
 # match 'kauhajoki'
 fields = ["title","name","location","venue","track","area","place","city","region","kind"]

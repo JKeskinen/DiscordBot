@@ -15,6 +15,11 @@ try:
 except Exception:  # pragma: no cover
     capacity_mod = None  # type: ignore[assignment]
 
+try:
+    from . import data_store as kk_data_store
+except Exception:
+    kk_data_store = None
+
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +71,15 @@ async def handle_spots(message: Any, parts: Any) -> None:
         "file",
     ):
         try:
-            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-            alert_path = os.path.join(base_dir, "CAPACITY_ALERTS.json")
-            if os.path.exists(alert_path):
-                with open(alert_path, "r", encoding="utf-8") as f:
-                    provided_res = json.load(f)
+            # prefer DB-backed store if available
+            if kk_data_store is not None:
+                provided_res = kk_data_store.load_category('CAPACITY_ALERTS')
+            else:
+                base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+                alert_path = os.path.join(base_dir, "CAPACITY_ALERTS.json")
+                if os.path.exists(alert_path):
+                    with open(alert_path, "r", encoding="utf-8") as f:
+                        provided_res = json.load(f)
         except Exception:
             provided_res = None
 
@@ -78,17 +87,22 @@ async def handle_spots(message: Any, parts: Any) -> None:
     # CAPACITY_ALERTS.json in the project root to avoid running a slow
     # live scan when the user simply typed `!spots`.
     try:
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-        alert_path = os.path.join(base_dir, "CAPACITY_ALERTS.json")
-        if provided_res is None and not arg_text and os.path.exists(alert_path):
-            age = time.time() - os.path.getmtime(alert_path)
-            # prefer cache younger than 1 hour (3600s)
-            if age < 3600:
-                try:
-                    with open(alert_path, "r", encoding="utf-8") as f:
-                        provided_res = json.load(f)
-                except Exception:
-                    provided_res = None
+        # Prefer DB-backed store when available
+        if provided_res is None and not arg_text and kk_data_store is not None:
+            provided_res = kk_data_store.load_category('CAPACITY_ALERTS')
+        # fallback to file cache if DB not available
+        if provided_res is None and not arg_text:
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+            alert_path = os.path.join(base_dir, "CAPACITY_ALERTS.json")
+            if os.path.exists(alert_path):
+                age = time.time() - os.path.getmtime(alert_path)
+                # prefer cache younger than 1 hour (3600s)
+                if age < 3600:
+                    try:
+                        with open(alert_path, "r", encoding="utf-8") as f:
+                            provided_res = json.load(f)
+                    except Exception:
+                        provided_res = None
     except Exception:
         provided_res = None
 

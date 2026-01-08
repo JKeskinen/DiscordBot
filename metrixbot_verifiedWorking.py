@@ -37,6 +37,10 @@ try:
     import settings as S  # type: ignore
 except Exception:
     S = None
+try:
+    from komento_koodit import data_store as kk_data_store
+except Exception:
+    kk_data_store = None
 
 # Configuration values (fall back to env when not provided in settings)
 DISCORD_TOKEN = getattr(S, 'DISCORD_TOKEN', os.environ.get('DISCORD_TOKEN'))
@@ -209,6 +213,13 @@ def post_startup_capacity_alerts(base_dir: str, token: Optional[str]):
     alerts_path = os.path.join(base_dir, 'CAPACITY_ALERTS.json')
 
     def _load_json(p):
+        # prefer sqlite-backed store (key is basename), fall back to file
+        try:
+            if kk_data_store is not None:
+                key = os.path.basename(p)
+                return kk_data_store.load_category(key)
+        except Exception:
+            pass
         try:
             with open(p, 'r', encoding='utf-8') as f:
                 return json.load(f)
@@ -328,7 +339,14 @@ def run_once():
         comps = pdga_mod.fetch_competitions(pdga_mod.DEFAULT_URL)
         pdga_entries = [c for c in comps if pdga_mod.is_pdga_entry(c)]
         out_pdga = os.path.join(base_dir, 'PDGA.json')
-        pdga_mod.save_pdga_list(pdga_entries, out_pdga)
+        # prefer sqlite-backed store when available
+        try:
+            if kk_data_store is not None:
+                kk_data_store.save_category('PDGA', pdga_entries)
+            else:
+                pdga_mod.save_pdga_list(pdga_entries, out_pdga)
+        except Exception:
+            pdga_mod.save_pdga_list(pdga_entries, out_pdga)
     except Exception as e:
         print('PDGA step failed:', e)
 
@@ -347,12 +365,23 @@ def run_once():
     # Doubles: call function and save DOUBLES.json
     try:
         doubles = pari_mod.find_doubles()
-        pari_mod.save_doubles_list(doubles, os.path.join(base_dir, 'DOUBLES.json'))
+        try:
+            if kk_data_store is not None:
+                kk_data_store.save_category('DOUBLES', doubles)
+            else:
+                pari_mod.save_doubles_list(doubles, os.path.join(base_dir, 'DOUBLES.json'))
+        except Exception:
+            pari_mod.save_doubles_list(doubles, os.path.join(base_dir, 'DOUBLES.json'))
     except Exception as e:
         print('Doubles step failed:', e)
 
     # Summarize outputs
     def _read_json(path):
+        try:
+            if kk_data_store is not None:
+                return kk_data_store.load_category(os.path.basename(path)) or []
+        except Exception:
+            pass
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 return json.load(f)

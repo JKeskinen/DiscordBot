@@ -1,0 +1,7 @@
+Posting startup capacity summary to target: 1456702993377267905
+[POST-EMBED] Discord -> url=https://discord.com/api/v10/channels/1456702993377267905/messages thread=1456702993377267905 token=MTQ1NT... embeds=2
+[POST-EMBED] Response status: 200
+[POST-EMBED] Response text (truncated): {"type":0,"content":"","mentions":[],"mention_roles":[],"attachments":[],"embeds":[{"type":"rich","title":"Metrix: Kapasiteettiskannaus (startup)","description":"Skannattuja kohteita: 35","color":3447003,"content_scan_version":0},{"type":"rich","title":"Kapasiteetti-ilmoituksia: 3","description":"[SFL MASTERS TOUR VIISARI BY RIEPPO SERVICE OY \u2014 j\u00e4ljell\u00e4: 8 (64/72)](https://discgolfm
+Posted embeds to Discord thread 1456702993377267905
+Posted startup capacity summary to Discord
+[STARTUP] Running initial competition fetch (run_once)

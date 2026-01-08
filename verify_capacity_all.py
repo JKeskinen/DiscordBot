@@ -6,13 +6,14 @@ import json
 import os
 import re
 from komento_koodit.check_capacity import check_competition_capacity
+from komento_koodit import data_store
 
 OUT = 'CAPACITY_VERIFICATION.json'
 ALERTS = 'CAPACITY_ALERTS.json'
 
 os.makedirs('debug_verify', exist_ok=True)
 
-alerts = json.load(open(ALERTS, encoding='utf-8'))
+alerts = data_store.load_category(ALERTS)
 report = []
 
 try:
@@ -113,5 +114,5 @@ if p:
     except Exception:
         pass
 
-open(OUT, 'w', encoding='utf-8').write(json.dumps(report, ensure_ascii=False, indent=2))
+data_store.save_category(OUT, report)
 print('Wrote', OUT)

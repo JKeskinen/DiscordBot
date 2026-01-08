@@ -2,6 +2,7 @@ import os
 import json
 import re
 from typing import Any, List
+import sqlite3
 
 try:
     import discord  # type: ignore[import]
@@ -34,37 +35,320 @@ async def handle_etsi(message: Any, parts: Any) -> None:
         "DOUBLES.json",
     ]
 
+    from . import data_store as _ds
     entries: List[Any] = []
     for fname in candidate_files:
-        path = os.path.join(root, fname)
         try:
-            if os.path.exists(path):
-                with open(path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    if isinstance(data, list):
-                        for item in data:
+            data = _ds.load_category(os.path.splitext(fname)[0])
+        except Exception:
+            data = []
+        try:
+            if isinstance(data, list):
+                for item in data:
+                    if isinstance(item, dict):
+                        item["_src_file"] = fname
+                    entries.append(item)
+            elif isinstance(data, dict):
+                for v in data.values():
+                    if isinstance(v, list):
+                        for item in v:
                             if isinstance(item, dict):
                                 item["_src_file"] = fname
                             entries.append(item)
-                    elif isinstance(data, dict):
-                        # some files may be dicts mapping ids to entries or lists
-                        for v in data.values():
-                            if isinstance(v, list):
-                                for item in v:
-                                    if isinstance(item, dict):
-                                        item["_src_file"] = fname
-                                    entries.append(item)
-                            else:
-                                if isinstance(v, dict):
-                                    v["_src_file"] = fname
-                                entries.append(v)
+                    else:
+                        if isinstance(v, dict):
+                            v["_src_file"] = fname
+                        entries.append(v)
         except Exception:
-            # ignore bad files
             continue
 
     if not entries:
         await message.channel.send("Kilpailutietokantaa ei löytynyt.")
         return
+
+    # Special case: class lookup -> !etsi luokka <code>
+    # Supports both textual class codes (e.g. 'ma3') and numeric rating thresholds (e.g. '896').
+    try:
+        if query.startswith('luokka'):
+            # extract target after 'luokka'
+            parts_after = query.split()
+            target = parts_after[1] if len(parts_after) > 1 else (parts[2] if len(parts) > 2 else None)
+            if not target:
+                await message.channel.send('Käyttö: !etsi luokka <koodi tai rating> — esim. !etsi luokka ma3 tai !etsi luokka 896')
+                return
+
+            target = str(target).strip().lower()
+            is_rating_query = target.isdigit()
+            rating_threshold = int(target) if is_rating_query else None
+
+            # load cache (new scanner writes an object with 'results' and
+            # a reference to 'class_definitions.json')
+            cache_path = os.path.join(root, 'CAPACITY_SCAN_RESULTS.json')
+            try:
+                with open(cache_path, 'r', encoding='utf-8') as cf:
+                    cache_raw = json.load(cf)
+            except Exception:
+                cache_raw = []
+            # normalize to list of records
+            if isinstance(cache_raw, dict) and 'results' in cache_raw:
+                cache = cache_raw.get('results') or []
+            elif isinstance(cache_raw, list):
+                cache = cache_raw
+            else:
+                cache = []
+
+            # load canonical class definitions if present
+            class_defs_map = {}
+            try:
+                defs_path = os.path.join(root, 'class_definitions.json')
+                if os.path.exists(defs_path):
+                    with open(defs_path, 'r', encoding='utf-8') as df:
+                        class_defs_map = json.load(df) or {}
+            except Exception:
+                class_defs_map = {}
+
+            results = []
+            loop = __import__('asyncio').get_running_loop()
+
+            async def _live_check(url: str):
+                try:
+                    def _run():
+                        try:
+                            if capacity_mod is None:
+                                return None
+                            return capacity_mod.check_competition_capacity(url, timeout=12)
+                        except Exception:
+                            return None
+                    return await loop.run_in_executor(None, _run)
+                except Exception:
+                    return None
+
+            total_entries = len(entries)
+            try:
+                await message.channel.send(f'Aloitetaan luokkahaku: {total_entries} kilpailua tarkistetaan...')
+            except Exception:
+                pass
+
+            processed = 0
+
+            for e in entries:
+                try:
+                    processed += 1
+                    if processed % 10 == 0:
+                        try:
+                            await message.channel.send(f'Luokkahaku: {processed}/{total_entries} käsitelty...')
+                        except Exception:
+                            pass
+                    title = e.get('title') or e.get('name') or ''
+                    url = e.get('url') or e.get('link') or ''
+                    date_text = e.get('date') or e.get('start_date') or ''
+
+                    matched = []
+
+                    # try cache first
+                    if cache and url:
+                        for rec in cache:
+                            try:
+                                if rec.get('url') == url or str(rec.get('id')) == str(e.get('id')):
+                                    # records may contain only per-event `class_counts`
+                                    # and not full `class_info`; normalize accordingly.
+                                    capr = (rec.get('capacity_result') or {})
+                                    ci = capr.get('class_info') or rec.get('class_info') or {}
+                                    if not isinstance(ci, dict):
+                                        ci = {}
+                                    classes_def = ci.get('classes') or []
+                                    # prefer explicit class_counts field (top-level or under capacity_result)
+                                    ccnts = capr.get('class_counts') or rec.get('class_counts') or ci.get('class_counts') or {}
+                                    if not isinstance(ccnts, dict):
+                                        ccnts = {}
+                                    # if no per-event class definitions, fall back to canonical
+                                    if not classes_def and class_defs_map:
+                                        # convert canonical mapping to list of class dicts
+                                        classes_def = []
+                                        try:
+                                            for code, info in class_defs_map.items():
+                                                classes_def.append({'code': code, 'name': info.get('display_name') or info.get('name') or '', 'eligibility': info.get('rating_limit')})
+                                        except Exception:
+                                            classes_def = []
+                                    # textual code match
+                                    if not is_rating_query:
+                                        for k, v in ccnts.items():
+                                            try:
+                                                if str(k).strip().lower() == target:
+                                                    matched.append((k, None, int(v or 0)))
+                                            except Exception:
+                                                continue
+                                    else:
+                                        # rating threshold: inspect class definitions
+                                        for cl in classes_def:
+                                            try:
+                                                text = ' '.join([str(cl.get('eligibility') or ''), str(cl.get('name') or ''), str(cl.get('code') or '')]).lower()
+                                                nums = re.findall(r'(\d{3,4})', text)
+                                                for n in nums:
+                                                    try:
+                                                        if rating_threshold is not None and int(n) >= rating_threshold:
+                                                            key = cl.get('code') or cl.get('name') or ''
+                                                            cnt = ccnts.get(key) if isinstance(ccnts, dict) else None
+                                                            cnt_val = int(cnt) if cnt is not None else None
+                                                            matched.append((key, cl.get('name'), cnt_val))
+                                                            break
+                                                    except Exception:
+                                                        continue
+                                            except Exception:
+                                                continue
+                                    break
+                            except Exception:
+                                continue
+
+                    # fallback live check when no cached matches
+                    if not matched and url and capacity_mod is not None:
+                        cap_res = await _live_check(url)
+                        if isinstance(cap_res, dict):
+                            live_ci = cap_res.get('class_info') or {}
+                            capr_live = (cap_res or {})
+                            live_ci = capr_live.get('class_info') or {}
+                            classes_def = live_ci.get('classes') or []
+                            ccnts = capr_live.get('class_counts') or live_ci.get('class_counts') or {}
+                            if not isinstance(ccnts, dict):
+                                ccnts = {}
+                            if not classes_def and class_defs_map:
+                                classes_def = []
+                                try:
+                                    for code, info in class_defs_map.items():
+                                        classes_def.append({'code': code, 'name': info.get('display_name') or info.get('name') or '', 'eligibility': info.get('rating_limit')})
+                                except Exception:
+                                    classes_def = []
+                            if not is_rating_query:
+                                for k, v in ccnts.items():
+                                    try:
+                                        if str(k).strip().lower() == target:
+                                            matched.append((k, None, int(v or 0)))
+                                    except Exception:
+                                        continue
+                            else:
+                                for cl in classes_def:
+                                    try:
+                                        text = ' '.join([str(cl.get('eligibility') or ''), str(cl.get('name') or ''), str(cl.get('code') or '')]).lower()
+                                        nums = re.findall(r'(\d{3,4})', text)
+                                        for n in nums:
+                                            try:
+                                                if rating_threshold is not None and int(n) >= rating_threshold:
+                                                    key = cl.get('code') or cl.get('name') or ''
+                                                    cnt = ccnts.get(key) if isinstance(ccnts, dict) else None
+                                                    cnt_val = int(cnt) if cnt is not None else None
+                                                    matched.append((key, cl.get('name'), cnt_val))
+                                                    break
+                                            except Exception:
+                                                continue
+                                    except Exception:
+                                        continue
+
+                    if matched:
+                        for key, name, cnt in matched:
+                            cap_display = ''
+                            try:
+                                if url:
+                                    cap_display = await _get_capacity_display_local(url)
+                            except Exception:
+                                cap_display = ''
+                            results.append((title, url, key or name or '', cnt, cap_display, date_text))
+                except Exception:
+                    continue
+
+            if not results:
+                try:
+                    await message.channel.send(f'Luokkaa "{target}" ei löytynyt avoimista ilmoittautumisista.')
+                except Exception:
+                    pass
+                return
+
+            # format output
+            # map known class codes to human-friendly color names
+            CODE_COLOR_MAP = {
+                'RPA': 'Gold',
+                'RAD': 'White',
+                'RAE': 'Red',
+                'RAF': 'Green',
+                'RAG': 'Purple'
+            }
+            # map codes to PDGA rating thresholds or notes
+            CODE_RATING_MAP = {
+                'RPA': 'kaikki',
+                'RAD': '<935',
+                'RAE': '<900',
+                'RAF': '<850',
+                'RAG': '<800'
+            }
+
+            def _display_code_label(code: str) -> str:
+                if not code:
+                    return ''
+                s = str(code).strip()
+                up = s.upper()
+                color = CODE_COLOR_MAP.get(up)
+                rating = CODE_RATING_MAP.get(up)
+                if color and rating:
+                    return f'{color} ({s}): {rating}'
+                if color:
+                    return f'{color} ({s})'
+                if rating:
+                    return f'{s}: {rating}'
+                return s
+
+            out_lines = []
+            if is_rating_query:
+                # results elements: (title,url,key,cnt,cap_display,date)
+                for title, url, key, cnt, cap_disp, date_text in sorted(results, key=lambda it: (-(it[3] or 0), it[0])):
+                    date_part = f' — {date_text}' if date_text else ''
+                    cap_part = f' — {cap_disp.strip()}' if cap_disp else ''
+                    key_display = _display_code_label(key)
+                    if url:
+                        out_lines.append(f'• [{title}]({url}) — luokat, rating>={target}: {key_display} ({cnt or 0}){cap_part}{date_part}')
+                    else:
+                        out_lines.append(f'• {title} — luokat, rating>={target}: {key_display} ({cnt or 0}){cap_part}{date_part}')
+            else:
+                for title, url, cnt, cap_disp, date_text in sorted(results, key=lambda it: (-(it[2] or 0), it[0])):
+                    date_part = f' — {date_text}' if date_text else ''
+                    cap_part = f' — {cap_disp.strip()}' if cap_disp else ''
+                    target_display = _display_code_label(target)
+                    if url:
+                        out_lines.append(f'• [{title}]({url}) — luokka {target_display}: {cnt} pelaajaa{cap_part}{date_part}')
+                    else:
+                        out_lines.append(f'• {title} — luokka {target_display}: {cnt} pelaajaa{cap_part}{date_part}')
+
+            # send chunked
+            max_len = 1900
+            cur = []
+            cur_len = 0
+            for ln in out_lines:
+                if cur_len + len(ln) + 1 > max_len and cur:
+                    try:
+                        Embed_cls = getattr(discord, 'Embed', None)
+                        if Embed_cls:
+                            embed = Embed_cls(title=f'Luokka {target} — löydöt', description='\n'.join(cur))
+                            await message.channel.send(embed=embed)
+                        else:
+                            await message.channel.send('\n'.join(cur))
+                    except Exception:
+                        await message.channel.send('\n'.join(cur))
+                    cur = []
+                    cur_len = 0
+                cur.append(ln)
+                cur_len += len(ln) + 1
+            if cur:
+                try:
+                    Embed_cls = getattr(discord, 'Embed', None)
+                    if Embed_cls:
+                        embed = Embed_cls(title=f'Luokka {target} — löydöt', description='\n'.join(cur))
+                        await message.channel.send(embed=embed)
+                    else:
+                        await message.channel.send('\n'.join(cur))
+                except Exception:
+                    await message.channel.send('\n'.join(cur))
+            return
+    except Exception:
+        # continue to normal text/area search on any failure
+        pass
 
     fields = [
         "title",
@@ -231,7 +515,10 @@ async def _get_capacity_display_local(url: str) -> str:
     except Exception:
         lim_int = None
 
+    # If registered is unknown but limit exists, show 0/limit per user request
     if reg_int is None:
+        if lim_int is not None and lim_int > 0:
+            return f" (0/{lim_int})"
         return ""
     if lim_int is not None and lim_int > 0:
         return f" ({reg_int}/{lim_int})"
@@ -270,16 +557,22 @@ async def handle_kisa(message: Any, parts: Any) -> None:
         # list PDGA.json competitions grouped by tier and area/region
         base_dir = os.path.abspath(os.path.dirname(__file__))
         root = os.path.abspath(os.path.join(base_dir, '..'))
-        path = os.path.join(root, 'PDGA.json')
+        # prefer reading PDGA list from sqlite json_store for speed
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
+            from . import data_store as _ds
+            data = _ds.load_category('PDGA')
         except Exception:
+            # fallback to file if sqlite not available
+            path = os.path.join(root, 'PDGA.json')
             try:
-                await message.channel.send('PDGA-dataa ei löytynyt.')
+                with open(path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
             except Exception:
-                pass
-            return
+                try:
+                    await message.channel.send('PDGA-dataa ei löytynyt.')
+                except Exception:
+                    pass
+                return
 
         if not isinstance(data, list):
             try:
@@ -288,90 +581,126 @@ async def handle_kisa(message: Any, parts: Any) -> None:
                 pass
             return
 
-        # Group by region/area (maakunta) and filter out per-round entries like '1. Kierros' / '2. Kierros'.
+        # Group by tier only and present in user-defined order (A,B,C,L,X,Other)
         from collections import defaultdict
 
-        groups: dict[str, list[dict]] = defaultdict(list)
+        tiers_map: dict[str, list[dict]] = defaultdict(list)
         for e in data:
             title = str(e.get('title') or e.get('name') or '')
-            # skip '1. Kierros' / '2. Kierros' round entries
+            # skip per-round entries
             if 'kierros' in title.lower():
                 continue
-            area = str(e.get('region') or e.get('area') or '').strip() or 'Muu'
-            groups[area].append(e)
+            raw_tier = str(e.get('tier') or '').strip()
+            if not raw_tier:
+                code = 'Other'
+            else:
+                code = raw_tier.split('-')[0].strip()
+                if not code:
+                    code = raw_tier
+            tiers_map[code].append(e)
 
-        lines: list[str] = []
-        # sort areas with 'Muu' last
-        def area_key(n: str) -> tuple[int, str]:
-            return (1, n.lower()) if n == 'Muu' else (0, n.lower())
+        # prepare quick DB lookup for existing capacity snapshots
+        db_path = os.path.join(root, 'data', 'discordbot.db')
+        try:
+            db_conn = sqlite3.connect(db_path)
+            db_cur = db_conn.cursor()
+        except Exception:
+            db_conn = None
+            db_cur = None
 
-        for area_name in sorted(groups.keys(), key=area_key):
-            lines.append(f"**{area_name}**")
-            area_events = sorted(groups[area_name], key=lambda ev: str(ev.get('date') or ''))
-            for e in area_events:
+        # desired tier order and ordering key
+        preferred = ['A', 'B', 'C', 'L', 'X']
+
+        def tier_order_key(k: str) -> tuple[int, str]:
+            if k in preferred:
+                return (0, preferred.index(k))
+            if k == 'Other':
+                return (2, k)
+            return (1, k)
+
+        # For each tier, send a separate message (title contains tier). This ensures one tier per message.
+        max_len = 1900
+        Embed_cls = getattr(discord, 'Embed', None)
+
+        sent_any = False
+        for tier_code in sorted(tiers_map.keys(), key=tier_order_key):
+            events = tiers_map[tier_code]
+            if not events:
+                continue
+            header = f"{tier_code}-tier" if tier_code != 'Other' else 'Other'
+            lines = [f"**{header}:**"]
+            for e in sorted(events, key=lambda ev: str(ev.get('title') or ev.get('name') or '')):
                 title = str(e.get('title') or e.get('name') or '')
                 url = str(e.get('url') or '')
                 date_text = str(e.get('date') or '')
-
-                # capacity: prefer check_capacity extraction, but format without parentheses
-                cap_str = ''
-                if url:
+                cap_part = ''
+                if url and db_cur is not None:
                     try:
-                        cap_res = await _get_capacity_display_local(url)
-                        # _get_capacity_display_local returns ' (reg/lim)' or ' (reg)'
-                        if cap_res:
-                            cap_str = cap_res.strip()
-                            if cap_str.startswith('(') and cap_str.endswith(')'):
-                                cap_str = cap_str[1:-1]
+                        db_cur.execute('SELECT registered, cap_limit FROM competitions WHERE url = ? LIMIT 1', (url,))
+                        row = db_cur.fetchone()
+                        if row:
+                            reg_val, lim_val = row[0], row[1]
+                            try:
+                                reg_i = int(reg_val) if reg_val is not None else None
+                            except Exception:
+                                reg_i = None
+                            try:
+                                lim_i = int(lim_val) if lim_val is not None else None
+                            except Exception:
+                                lim_i = None
+                            if reg_i is None and lim_i is not None:
+                                cap_part = f" ({0}/{lim_i})"
+                            elif reg_i is not None and lim_i is not None:
+                                cap_part = f" ({reg_i}/{lim_i})"
+                            elif reg_i is not None:
+                                cap_part = f" ({reg_i})"
                     except Exception:
-                        cap_str = ''
-
-                suffix = f' — {date_text}' if date_text else ''
-                cap_suffix = f' — {cap_str}' if cap_str else ''
+                        cap_part = ''
                 if url:
-                    lines.append(f"• [{title}]({url}){suffix}{cap_suffix}")
+                    lines.append(f"- [{title}]({url}){cap_part}")
                 else:
-                    lines.append(f"• {title}{suffix}{cap_suffix}")
-            lines.append('')
-
-        desc = '\n'.join(lines).strip()
-        if not desc:
-            try:
-                await message.channel.send('Ei PDGA-kisoja löydetty.')
-            except Exception:
-                pass
-            return
-
-        # send chunked
-        max_len = 1900
-        cur = []
-        cur_len = 0
-        for ln in desc.split('\n'):
-            if cur_len + len(ln) + 1 > max_len and cur:
+                    lines.append(f"- {title}{cap_part}")
+                if date_text:
+                    lines.append(f"    {date_text}")
+            # chunk and send this tier's message(s)
+            cur = []
+            cur_len = 0
+            for ln in '\n'.join(lines).split('\n'):
+                if cur_len + len(ln) + 1 > max_len and cur:
+                    try:
+                        if Embed_cls:
+                            embed = Embed_cls(title=f'PDGA - {header}', description='\n'.join(cur))
+                            await message.channel.send(embed=embed)
+                        else:
+                            await message.channel.send('\n'.join(cur))
+                    except Exception:
+                        await message.channel.send('\n'.join(cur))
+                    cur = []
+                    cur_len = 0
+                cur.append(ln)
+                cur_len += len(ln) + 1
+            if cur:
                 try:
-                    Embed_cls = getattr(discord, 'Embed', None)
                     if Embed_cls:
-                        embed = Embed_cls(title='PDGA-kisat', description='\n'.join(cur))
+                        embed = Embed_cls(title=f'PDGA - {header}', description='\n'.join(cur))
                         await message.channel.send(embed=embed)
                     else:
                         await message.channel.send('\n'.join(cur))
                 except Exception:
                     await message.channel.send('\n'.join(cur))
-                cur = []
-                cur_len = 0
-            cur.append(ln)
-            cur_len += len(ln) + 1
+            sent_any = True
 
-        if cur:
+        if not sent_any:
             try:
-                Embed_cls = getattr(discord, 'Embed', None)
-                if Embed_cls:
-                    embed = Embed_cls(title='PDGA-kisat', description='\n'.join(cur))
-                    await message.channel.send(embed=embed)
-                else:
-                    await message.channel.send('\n'.join(cur))
+                await message.channel.send('Ei PDGA-kisoja löydetty.')
             except Exception:
-                await message.channel.send('\n'.join(cur))
+                pass
+        # close DB connection if opened
+        try:
+            if db_conn is not None:
+                db_conn.close()
+        except Exception:
+            pass
         return
 
     # unknown subcommand

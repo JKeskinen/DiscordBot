@@ -1,8 +1,7 @@
 import os, json
+from komento_koodit import data_store
 base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-path = os.path.join(base_dir, 'CAPACITY_ALERTS.json')
-with open(path, 'r', encoding='utf-8') as f:
-    res = json.load(f)
+res = data_store.load_category('CAPACITY_ALERTS')
 lines = []
 for c in res[:200]:
     name = c.get('title') or c.get('name') or c.get('name_en') or c.get('event') or ''

@@ -175,16 +175,24 @@ def check_competition(comp: dict) -> dict:
 
 if __name__ == '__main__':
     comps = []
-    # load PDGA and weekly lists
+    # load PDGA and weekly lists (prefer sqlite-backed store)
+    try:
+        from . import data_store as _ds
+    except Exception:
+        _ds = None
     for path, label in ((PDGA_PATH, 'PDGA'), (WEEKLY_PATH, 'VIIKKOKISA')):
         try:
-            with open(path, 'r', encoding='utf-8') as f:
-                lst = json.load(f)
-                for c in lst:
-                    # ensure kind field for weekly entries
-                    if label == 'VIIKKOKISA':
-                        c.setdefault('kind', 'VIIKKOKISA')
-                    comps.append(c)
+            if _ds is not None:
+                key = os.path.splitext(os.path.basename(path))[0]
+                lst = _ds.load_category(key) or []
+            else:
+                with open(path, 'r', encoding='utf-8') as f:
+                    lst = json.load(f)
+            for c in lst:
+                # ensure kind field for weekly entries
+                if label == 'VIIKKOKISA':
+                    c.setdefault('kind', 'VIIKKOKISA')
+                comps.append(c)
         except FileNotFoundError:
             print(f'{label} -tiedostoa ei löytynyt kohdasta {path}; ohitetaan')
         except Exception as e:
@@ -199,8 +207,13 @@ if __name__ == '__main__':
     # filter only open
     open_comps = [r for r in results if r.get('registration_open')]
     try:
-        with open(OUT_PATH, 'w', encoding='utf-8') as f:
-            json.dump(open_comps, f, ensure_ascii=False, indent=2)
-        print(f'Tallennettu {len(open_comps)} avoinna olevaa rekisteröintiä tiedostoon', OUT_PATH)
+        from . import data_store as _ds
+        if _ds is not None:
+            _ds.save_category(os.path.splitext(os.path.basename(OUT_PATH))[0], open_comps)
+            print(f'Tallennettu {len(open_comps)} avoinna olevaa rekisteröintiä tietokantaan')
+        else:
+            with open(OUT_PATH, 'w', encoding='utf-8') as f:
+                json.dump(open_comps, f, ensure_ascii=False, indent=2)
+            print(f'Tallennettu {len(open_comps)} avoinna olevaa rekisteröintiä tiedostoon', OUT_PATH)
     except Exception as e:
-        print('Tallennus epäonnistui tiedostoon pending_registration.json:', e)
+        print('Tallennus epäonnistui pending registration -tallennuksessa:', e)

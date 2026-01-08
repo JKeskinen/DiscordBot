@@ -11,6 +11,11 @@ try:
 except Exception:
     sync_playwright = None
 
+try:
+    from . import data_store
+except Exception:
+    data_store = None
+
 USER_AGENT = {'User-Agent': 'Mozilla/5.0 (metrixbot-capacity)'}
 
 logger = logging.getLogger(__name__)
@@ -513,6 +518,102 @@ def _playwright_tjing_fallback(tjing_url: str, timeout: int = 10):
     return None
 
 
+def _parse_metrix_classes_and_counts(soup: BS):
+    """Parse Metrix 'Luokka' table (class definitions) and try to count registered
+    players per class from the registration table when possible.
+    Returns dict with keys 'classes' (list of {code,name,eligibility}) and
+    'class_counts' (map code->int).
+    """
+    try:
+        classes = []
+        class_counts = {}
+        # find a table that declares classes (headers contain 'luokka' or 'class')
+        for table in soup.find_all('table'):
+            headers = [th.get_text(strip=True).lower() for th in table.find_all('th')]
+            hdr_text = ' '.join(headers)
+            if 'luokka' in hdr_text or 'class' in hdr_text:
+                # parse class definition rows
+                for tr in table.select('tbody tr'):
+                    if not tr.find_all('td'):
+                        continue
+                    tds = tr.find_all('td')
+                    first = tds[0]
+                    code_span = first.find('span', class_='league')
+                    code = code_span.get_text(strip=True) if code_span else None
+                    if code_span:
+                        span_text = code_span.get_text()
+                        name = first.get_text(' ', strip=True).replace(span_text, '').strip()
+                    else:
+                        name = first.get_text(' ', strip=True)
+                    eligibility = tds[1].get_text(' ', strip=True) if len(tds) > 1 else ''
+                    entry = {'code': code, 'name': name, 'eligibility': eligibility}
+                    classes.append(entry)
+                break
+
+        # attempt to find registration/player table and count per-class
+        # look for table with header 'name'/'nimi' or that looks like player list
+        reg_table = None
+        for table in soup.find_all('table'):
+            hdrs = [th.get_text(strip=True).lower() for th in table.find_all('th')]
+            hdrs_text = ' '.join(hdrs)
+            if 'nimi' in hdrs_text or 'name' in hdrs_text or 'table_name' in hdrs_text or 'startnr' in hdrs_text:
+                reg_table = table
+                break
+        if reg_table is None:
+            # fallback: pick the largest table by data rows
+            best = None
+            best_count = 0
+            for table in soup.find_all('table'):
+                rows = [r for r in table.select('tbody tr') if r.find_all('td')]
+                if len(rows) > best_count:
+                    best = table
+                    best_count = len(rows)
+            reg_table = best
+
+        if reg_table is not None:
+            # determine which column (if any) contains class codes
+            headers = [th.get_text(strip=True).lower() for th in reg_table.find_all('th')]
+            class_idx = None
+            for i, h in enumerate(headers):
+                if 'luokka' in h or 'class' in h or 'luokka' in h or 'league' in h:
+                    class_idx = i
+                    break
+            # iterate rows and extract class info
+            for tr in reg_table.select('tbody tr'):
+                if not tr.find_all('td'):
+                    continue
+                tds = tr.find_all('td')
+                code = None
+                # prefer dedicated class column
+                if class_idx is not None and class_idx < len(tds):
+                    cell = tds[class_idx]
+                    span = cell.find('span', class_='league')
+                    if span:
+                        code = span.get_text(strip=True)
+                    else:
+                        code = cell.get_text(' ', strip=True).strip() or None
+                else:
+                    # try to find any span.league inside the row
+                    span = tr.find('span', class_='league')
+                    if span:
+                        code = span.get_text(strip=True)
+                if code:
+                    class_counts[code] = class_counts.get(code, 0) + 1
+
+        # Heuristic: if every detected class has exactly 1 registered and there
+        # are many classes, this likely reflects presence of class definitions
+        # (or a header row per class) rather than real per-class registrations.
+        if class_counts:
+            vals = list(class_counts.values())
+            if all(v == 1 for v in vals) and len(vals) >= 4:
+                # treat as unreliable and return empty counts
+                class_counts = {}
+
+        return {'classes': classes, 'class_counts': class_counts}
+    except Exception:
+        return {'classes': [], 'class_counts': {}}
+
+
 def fetch_tjing_capacity(tjing_url: str, timeout=10):
     """Fetch TJing players/confirmed page or related URL and extract confirmed/capacity."""
     try:
@@ -940,7 +1041,13 @@ def check_competition_capacity(url: str, timeout=15):
                             continue
                         if not any('Rekisteröitynyt' in h or 'Registered' in h for h in header_cells_local):
                             continue
-                        body_rows_local = tbl.find('tbody').find_all('tr') if tbl.find('tbody') else tbl.find_all('tr')[1:]
+                        # Count only rows that contain actual data cells (<td>),
+                        # ignore header/subheader <tr> elements which may inflate counts.
+                        if tbl.find('tbody'):
+                            candidate_rows = tbl.find('tbody').find_all('tr')
+                        else:
+                            candidate_rows = tbl.find_all('tr')[1:]
+                        body_rows_local = [r for r in candidate_rows if r.find_all('td')]
                         if body_rows_local:
                             return len(body_rows_local)
                     return None
@@ -1124,6 +1231,15 @@ def check_competition_capacity(url: str, timeout=15):
                         return _sanitize_capacity({'registered': found_reg, 'limit': found_lim, 'remaining': rem, 'note': 'metrix-playwright-phrase'})
                 except Exception:
                     pass
+                # parse per-class definitions and counts when available
+                try:
+                    class_info = _parse_metrix_classes_and_counts(soup_r)
+                    if class_info and (class_info.get('classes') or class_info.get('class_counts')):
+                        out = {'registered': found_reg, 'limit': found_lim, 'remaining': rem, 'note': 'metrix-direct-phrase'}
+                        out['class_info'] = class_info
+                        return _sanitize_capacity(out)
+                except Exception:
+                    pass
 
                 # re-run heuristics on rendered text
                 reg3, lim3 = _extract_registered_and_limit(body_text or content, url)
@@ -1243,10 +1359,14 @@ def find_low_capacity(files=None, threshold=20):
         alerts.append(entry)
 
     # persist alerts
-    out = os.path.join(base, 'CAPACITY_ALERTS.json')
+    # persist alerts into sqlite-backed store (fallback to file handled by data_store)
     try:
-        with open(out, 'w', encoding='utf-8') as f:
-            json.dump(alerts, f, ensure_ascii=False, indent=2)
+        if data_store is not None:
+            data_store.save_category('CAPACITY_ALERTS', alerts)
+        else:
+            out = os.path.join(base, 'CAPACITY_ALERTS.json')
+            with open(out, 'w', encoding='utf-8') as f:
+                json.dump(alerts, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
     return alerts
@@ -1263,17 +1383,24 @@ def scan_pdga_for_tjing(files=None, out_name='TJING_REGISTRATIONS.json'):
     comps = []
     for p in files:
         try:
-            if os.path.exists(p):
-                with open(p, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    if isinstance(data, list):
-                        comps.extend(data)
-                    elif isinstance(data, dict):
-                        for v in data.values():
-                            if isinstance(v, list):
-                                comps.extend(v)
-                            else:
-                                comps.append(v)
+            # prefer sqlite-backed store when available
+            if data_store is not None:
+                key = os.path.splitext(os.path.basename(p))[0]
+                data = data_store.load_category(key) or []
+            else:
+                if os.path.exists(p):
+                    with open(p, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                else:
+                    data = []
+            if isinstance(data, list):
+                comps.extend(data)
+            elif isinstance(data, dict):
+                for v in data.values():
+                    if isinstance(v, list):
+                        comps.extend(v)
+                    else:
+                        comps.append(v)
         except Exception:
             continue
 
@@ -1300,10 +1427,14 @@ def scan_pdga_for_tjing(files=None, out_name='TJING_REGISTRATIONS.json'):
         except Exception as e:
             logger.exception('scan_pdga_for_tjing failed for %s: %s', metrix, e)
 
-    out = os.path.join(base, out_name)
+    # persist TJing registrations in sqlite-backed store (fallback to file via data_store)
     try:
-        with open(out, 'w', encoding='utf-8') as f:
-            json.dump(results, f, ensure_ascii=False, indent=2)
+        if data_store is not None:
+            data_store.save_category(os.path.splitext(out_name)[0], results)
+        else:
+            out = os.path.join(base, out_name)
+            with open(out, 'w', encoding='utf-8') as f:
+                json.dump(results, f, ensure_ascii=False, indent=2)
     except Exception:
         pass
     return results

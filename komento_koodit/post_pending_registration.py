@@ -40,15 +40,29 @@ KNOWN_WEEKLY = os.path.join(BASE_DIR, 'known_weekly_competitions.json')
 CAPACITY_SCAN_PATH = os.path.join(BASE_DIR, 'CAPACITY_SCAN_RESULTS.json')
 CAPACITY_CACHE = {}
 try:
-    if os.path.exists(CAPACITY_SCAN_PATH):
-        with open(CAPACITY_SCAN_PATH, 'r', encoding='utf-8') as f:
-            _scan = json.load(f)
-            for rec in _scan:
-                key = rec.get('url') or rec.get('id')
-                if key:
-                    CAPACITY_CACHE[str(key)] = rec.get('capacity_result') or {}
+    # prefer sqlite-backed store
+    from . import data_store as _ds
+    scan_key = os.path.basename(CAPACITY_SCAN_PATH)
+    _scan = _ds.load_category(scan_key) or []
+    # _ds.load_category returns the list directly when stored with {'results': [...]}.
+    for rec in _scan:
+        if not isinstance(rec, dict):
+            continue
+        key = rec.get('url') or rec.get('id')
+        if key:
+            CAPACITY_CACHE[str(key)] = rec.get('capacity_result') or {}
 except Exception:
-    CAPACITY_CACHE = {}
+    # fallback to file-based load for compatibility
+    try:
+        if os.path.exists(CAPACITY_SCAN_PATH):
+            with open(CAPACITY_SCAN_PATH, 'r', encoding='utf-8') as f:
+                _scan = json.load(f)
+                for rec in _scan:
+                    key = rec.get('url') or rec.get('id')
+                    if key:
+                        CAPACITY_CACHE[str(key)] = rec.get('capacity_result') or {}
+    except Exception:
+        CAPACITY_CACHE = {}
 
 _load_dotenv()
 TOKEN = None
@@ -91,6 +105,13 @@ MAX_ITEMS_PER_EMBED = 12
 
 
 def load_pending():
+    # prefer sqlite-backed store
+    try:
+        from . import data_store as _ds
+        key = os.path.splitext(os.path.basename(PENDING_PATH))[0]
+        return _ds.load_category(key) or []
+    except Exception:
+        pass
     try:
         with open(PENDING_PATH, 'r', encoding='utf-8') as f:
             return json.load(f)
@@ -233,6 +254,30 @@ def build_embeds_with_title(items, title, color):
 
 
 def load_known(path):
+    # prefer sqlite-backed store
+    try:
+        from . import data_store as _ds
+        key = os.path.splitext(os.path.basename(path))[0]
+        data = _ds.load_category(key) or []
+        keys = set()
+        for x in data:
+            try:
+                if isinstance(x, dict):
+                    k = x.get('id') or x.get('url') or x.get('name') or x.get('title')
+                    if k is None:
+                        keys.add(str(x))
+                    else:
+                        keys.add(str(k))
+                else:
+                    keys.add(str(x))
+            except Exception:
+                try:
+                    keys.add(str(x))
+                except Exception:
+                    continue
+        return keys
+    except Exception:
+        pass
     try:
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -259,6 +304,14 @@ def load_known(path):
 
 
 def save_known(path, ids):
+    # prefer sqlite-backed store
+    try:
+        from . import data_store as _ds
+        key = os.path.splitext(os.path.basename(path))[0]
+        _ds.save_category(key, list(ids))
+        return
+    except Exception:
+        pass
     try:
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(list(ids), f, ensure_ascii=False, indent=2)

@@ -42,6 +42,12 @@ CLUB_DETECTIONS: List[Dict[str, str]] = []
 
 
 def _load_club_successes() -> Dict[str, Dict]:
+    # Prefer sqlite-backed store via komento_koodit.data_store when available
+    try:
+        if data_store is not None:
+            return data_store.load_category(os.path.basename(CLUB_SUCCESS_FILE)) or {}
+    except Exception:
+        pass
     try:
         with open(CLUB_SUCCESS_FILE, 'r', encoding='utf-8') as f:
             return json.load(f) or {}
@@ -52,6 +58,12 @@ def _load_club_successes() -> Dict[str, Dict]:
 
 
 def _save_club_successes(data: Dict[str, Dict]) -> None:
+    try:
+        if data_store is not None:
+            data_store.save_category(os.path.basename(CLUB_SUCCESS_FILE), data)
+            return
+    except Exception:
+        pass
     try:
         with open(CLUB_SUCCESS_FILE, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)

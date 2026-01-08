@@ -1,5 +1,6 @@
 import json
 import os
+from komento_koodit import data_store
 
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 SRC = os.path.join(BASE, 'CAPACITY_SCAN_RESULTS.json')
@@ -7,8 +8,7 @@ OUT = os.path.join(BASE, 'CAPACITY_ALERTS.json')
 
 THRESHOLD = 20
 
-with open(SRC, 'r', encoding='utf-8') as f:
-    data = json.load(f)
+data = data_store.load_category(os.path.basename(SRC))
 
 alerts = []
 # normalize: if there is no explicit limit, clear remaining (no max players)
@@ -36,7 +36,8 @@ for item in data:
             'note': cap.get('note')
         })
 
-with open(OUT, 'w', encoding='utf-8') as f:
-    json.dump(alerts, f, ensure_ascii=False, indent=2)
-
-print(f'Wrote {len(alerts)} alerts to {OUT}')
+data_store.save_category(os.path.basename(OUT), alerts)
+try:
+    print(f'Wrote {len(alerts)} alerts to sqlite as {os.path.splitext(os.path.basename(OUT))[0]}')
+except Exception:
+    print(f'Wrote {len(alerts)} alerts to sqlite')

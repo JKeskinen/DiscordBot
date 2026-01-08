@@ -1,10 +1,11 @@
 import json
 import re
 from datetime import datetime
+from komento_koodit import data_store
+
 
 def load_pdga(path='PDGA.json'):
-    with open(path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    data = data_store.load_category(path)
     return data if isinstance(data, list) else data.get('competitions', data.get('items', []))
 
 def is_pdga_container(item, all_items):

@@ -2,6 +2,7 @@ import os
 import json
 import re
 from datetime import datetime
+from komento_koodit import data_store
 
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 SCAN = os.path.join(BASE, 'CAPACITY_SCAN_RESULTS.json')
@@ -49,11 +50,11 @@ def parse_date_from_item(item):
 
 
 def main():
-    if not os.path.exists(SCAN):
+    # load scan results from sqlite-backed store (fallback to file)
+    data = data_store.load_category(os.path.basename(SCAN))
+    if not data:
         print('Ei kapasiteettiskannauksen tuloksia tiedostossa', SCAN)
         return
-    with open(SCAN, 'r', encoding='utf-8') as f:
-        data = json.load(f)
 
     alerts = []
     remaining_scan = []
@@ -123,28 +124,30 @@ def main():
             pass
 
     # write alerts
-    with open(ALERTS, 'w', encoding='utf-8') as f:
-        json.dump(alerts, f, ensure_ascii=False, indent=2)
-    print('Kirjoitettiin', len(alerts), 'kapasiteetti-ilmoitusta tiedostoon', ALERTS)
+    data_store.save_category(os.path.basename(ALERTS), alerts)
+    try:
+        print('Kirjoitettiin', len(alerts), 'kapasiteetti-ilmoitusta sqlite:', os.path.splitext(os.path.basename(ALERTS))[0])
+    except Exception:
+        print('Kirjoitettiin', len(alerts), 'kapasiteetti-ilmoitusta')
 
     # write updated scan results (excluding archived)
-    with open(SCAN, 'w', encoding='utf-8') as f:
-        json.dump(remaining_scan, f, ensure_ascii=False, indent=2)
-    print('Päivitettiin kapasiteettiskannauksen tulokset; rivejä jäljellä:', len(remaining_scan))
+    data_store.save_category(os.path.basename(SCAN), remaining_scan)
+    try:
+        print('Päivitettiin kapasiteettiskannauksen tulokset sqlite:', os.path.splitext(os.path.basename(SCAN))[0], '; rivejä jäljellä:', len(remaining_scan))
+    except Exception:
+        print('Päivitettiin kapasiteettiskannauksen tulokset; rivejä jäljellä:', len(remaining_scan))
 
     # append archived items to per-year history files
     for path, items in archived.items():
-        existing = []
-        if os.path.exists(path):
-            try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    existing = json.load(f) or []
-            except Exception:
-                existing = []
+        # `path` was originally a filesystem path; convert to basename for DB key
+        hist_name = os.path.basename(path)
+        existing = data_store.load_category(hist_name) or []
         existing.extend(items)
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(existing, f, ensure_ascii=False, indent=2)
-        print('Arkistoitiin', len(items), 'tapahtumaa tiedostoon', path)
+        data_store.save_category(hist_name, existing)
+        try:
+            print('Arkistoitiin', len(items), 'tapahtumaa historioihin sqlite:', hist_name)
+        except Exception:
+            print('Arkistoitiin', len(items), 'tapahtumaa historioihin', hist_name)
 
 
 if __name__ == '__main__':

@@ -10,8 +10,8 @@ ct._increment_club_success(mid, name, club, context='Simulated from provided pro
 print('Recorded Lakeus success for', name)
 
 try:
-    with open(ct.CLUB_SUCCESS_FILE, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    from komento_koodit import data_store
+    data = data_store.load_category(os.path.basename(ct.CLUB_SUCCESS_FILE))
     print('\nclub_successes.json content:')
     print(json.dumps(data, ensure_ascii=False, indent=2))
 except Exception as e:

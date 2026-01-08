@@ -14,15 +14,25 @@ async def handle_rek(message: Any, parts: Any) -> None:
     # parse command args (allow: !rek, !rek pdga, !rek week)
     arg = parts[1].lower() if len(parts) > 1 else None
 
-    # Load pending registrations
-    base_dir = os.path.abspath(os.path.dirname(__file__))
-    # project root
-    root = os.path.abspath(os.path.join(base_dir, ".."))
-    pending_path = os.path.join(root, "pending_registration.json")
+    # Load pending registrations (prefer sqlite-backed store)
     entries = []
     try:
-        with open(pending_path, "r", encoding="utf-8") as f:
-            entries = json.load(f)
+        from . import data_store as _ds
+    except Exception:
+        _ds = None
+    try:
+        if _ds is not None:
+            entries = _ds.load_category('pending_registration') or []
+        else:
+            base_dir = os.path.abspath(os.path.dirname(__file__))
+            # project root
+            root = os.path.abspath(os.path.join(base_dir, ".."))
+            pending_path = os.path.join(root, "pending_registration.json")
+            try:
+                with open(pending_path, "r", encoding="utf-8") as f:
+                    entries = json.load(f)
+            except Exception:
+                entries = []
     except Exception:
         entries = []
 

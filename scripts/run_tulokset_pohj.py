@@ -7,6 +7,7 @@ samanlailla kuin botti tekisi, ja tulostaa muodostetun viestin konsoliin.
 import asyncio
 import json
 import os
+from komento_koodit import data_store
 import sys
 
 # Lisää projektin juurihakemisto polulle
@@ -17,9 +18,8 @@ from komento_koodit import commands_tulokset as ct
 
 
 def load_entries(filename: str):
-    path = os.path.join(ROOT, filename)
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    # Use sqlite-backed store (fallback to file)
+    return data_store.load_category(filename)
 
 
 async def main():

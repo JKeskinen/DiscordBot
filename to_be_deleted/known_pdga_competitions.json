@@ -24,6 +24,14 @@
     "url": "https://discgolfmetrix.com/3519179"
   },
   {
+    "id": "3523380",
+    "name": "Meilahden kauden avaus 2026",
+    "tier": "C - PDGA",
+    "date": "01/18/26 09:00",
+    "location": "Players: 7",
+    "url": "https://discgolfmetrix.com/3523380"
+  },
+  {
     "id": "3509798",
     "name": "NBDG Winter Tour™ Powered by Valostore → #5 Ford DGP",
     "tier": "C - PDGA",
@@ -48,11 +56,19 @@
     "url": "https://discgolfmetrix.com/3511868"
   },
   {
+    "id": "3523189",
+    "name": "Väykkä Eläkkeelle",
+    "tier": "C - PDGA",
+    "date": "01/31/26 09:00",
+    "location": "Meilahti → 18 - Par 54 (Kilpailu)",
+    "url": "https://discgolfmetrix.com/3523189"
+  },
+  {
     "id": "3512572",
     "name": "WDG:n PDGA-Liiga 1/2026",
     "tier": "L - PDGA",
     "date": "02/01/26 - 03/29/26",
-    "location": "Players: 1",
+    "location": "Players: 2",
     "url": "https://discgolfmetrix.com/3512572"
   },
   {
@@ -214,21 +230,5 @@
     "date": "03/22/26 11:00",
     "location": "Sahanmäki Talvi 2025-26",
     "url": "https://discgolfmetrix.com/3512047"
-  },
-  {
-    "id": "3512596",
-    "name": "WDG:n PDGA-Liiga 1/2026 → 22.3.2026, Talvi-Lyyti",
-    "tier": "L - PDGA",
-    "date": "03/22/26 12:00",
-    "location": "Lyytikkälän Frisbeegolfrata (LPR) uudistettu 18",
-    "url": "https://discgolfmetrix.com/3512596"
-  },
-  {
-    "id": "3516653",
-    "name": "Skogby kevätrieha 2026",
-    "tier": "C - PDGA",
-    "date": "03/28/26 10:00",
-    "location": "Skogby,  → Skogby kevätrieha 2026",
-    "url": "https://discgolfmetrix.com/3516653"
   }
 ]
