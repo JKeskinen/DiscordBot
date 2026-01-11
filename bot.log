@@ -1,0 +1,5 @@
+[POST] Discord -> url=https://discord.com/api/v10/channels/1456702993377267905/messages thread=1456702993377267905 token=MTQ1NT... payload_len=1048
+[POST] Response status: 200
+[POST] Response text (truncated): {"type":0,"content":"\ud83d\uddde\ufe0f LakeusBotti \u2014 viikon yhteenveto\nViime viikolla kilpaillut: 4 tapahtumaa\n\u2022 [SFL MASTERS TOUR VIISARI BY RIEPPO SERVICE OY](https://discgolfmetrix.com/3500547) \u2014 10.01.2026 | **Pro Master 40+ (28 pelaajaa)** / 1) Petri Valkeinen 01/10/26 10:00 (rtg 995) / 1) Jani Bergstr\u00f6m 01/10/26 10:00 (rtg 996)\n\u2022 [SFL MASTERS TOUR VIISARI BY RIEP
+Posted summary to Discord thread 1456702993377267905
+[STARTUP] Running initial competition fetch (run_once)

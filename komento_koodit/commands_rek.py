@@ -11,6 +11,13 @@ except Exception:  # pragma: no cover
 
 async def handle_rek(message: Any, parts: Any) -> None:
     """Handle the !rek command (pending registrations listing)."""
+    # The !rek command is disabled. Route users to `!kisa` instead.
+    try:
+        await message.channel.send("Komento `!rek` on poistettu käytöstä. Käytä `!kisa`-komentoa sen sijaan.")
+    except Exception:
+        pass
+    return
+
     # parse command args (allow: !rek, !rek pdga, !rek week)
     arg = parts[1].lower() if len(parts) > 1 else None
 

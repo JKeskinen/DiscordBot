@@ -132,7 +132,6 @@ def _kilpailut_help_description() -> str:
         "Kilpailut\n"
         "🏆 Kilpailut ja muistutukset\n\n"
         "Seuraa ja etsi kilpailuja sekä tarkista, missä paikkoja on vähän.\n\n"
-        "!rek — Näytä avoimet rekisteröinnit (PDGA / viikkokisat).\n"
         "!etsi <hakusana> — Etsi kilpailuja nimen, alueen tai radan mukaan.\n"
         "!paikat — Näytä kilpailut, joissa on vähän paikkoja jäljellä.\n"
         "!viikkarit [ep|pohj|kp|ks|pirk|sata|mk|suomi] — Tämän viikon viikkokisat (maakunnittain, lähimaakunnissa tai koko Suomi).\n\n"
@@ -144,7 +143,7 @@ def _kilpailut_help_description() -> str:
         "  muodossa `!kisa viikkari` jolloin se delegoi olemassa olevaan viikkarit-toiminnallisuuteen.\n\n"
         "Tulospalvelu-komennot on kuvattu erikseen: !ohje tulospalvelu.\n\n"
         "Lyhenteet: ep = Etelä-Pohjanmaa, pohj = Pohjanmaa, kp = Keski-Pohjanmaa, ks = Keski-Suomi, pirk = Pirkanmaa, sata = Satakunta, mk = lähimaakunnat (EP + naapurit).\n\n"
-        "Komennot:\n!rek\n!etsi\n!paikat\n!viikkarit\n"
+        "Komennot:\n!etsi\n!paikat\n!viikkarit\n"
     )
 
 
@@ -213,7 +212,7 @@ def get_help_message(topic: Optional[str] = None) -> Dict[str, str]:
         return {"title": "!metrix", "description": _metrix_help_description()}
 
     # Kilpailut / kisa
-    if normalized in {"kisa", "kisat", "kilpailu", "kilpailut", "rek", "spots", "paikat", "etsi", "viikkari", "viikkarit"}:
+    if normalized in {"kisa", "kisat", "kilpailu", "kilpailut", "spots", "paikat", "etsi", "viikkari", "viikkarit"}:
         return {"title": BASE_TITLE, "description": _kilpailut_help_description()}
 
     # Tulospalvelu: accept singular/plural

@@ -9,9 +9,27 @@ import csv
 from datetime import datetime, date, timedelta
 from typing import Optional
 import traceback
+import socket
+import sys
 
 # Module base dir
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+
+# Single-instance guard: try to bind a localhost port; if binding fails, assume another
+# instance is running and exit. Port can be overridden with env METRIX_SINGLE_INSTANCE_PORT.
+try:
+    SINGLE_INSTANCE_PORT = int(os.environ.get('METRIX_SINGLE_INSTANCE_PORT', '49321'))
+except Exception:
+    SINGLE_INSTANCE_PORT = 49321
+_single_instance_socket = None
+try:
+    _single_instance_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    _single_instance_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    _single_instance_socket.bind(('127.0.0.1', SINGLE_INSTANCE_PORT))
+    _single_instance_socket.listen(1)
+except Exception:
+    print(f'Another MetrixBot instance appears to be running (port {SINGLE_INSTANCE_PORT} in use); exiting.')
+    sys.exit(0)
 
 # Configure structured logging similar to discord.py examples
 LOG_FMT = "%(asctime)s %(levelname)-8s %(name)s %(message)s"
@@ -105,16 +123,33 @@ def _format_date_field(raw_date: str) -> str:
         return ''
     # Etsi ensimmäinen "MM/DD/YY"-tyyppinen päivämääräteksti.
     m = re.search(r'(\d{1,2})/(\d{1,2})/(\d{2,4})', raw_date)
-    if not m:
-        return '' if DISCORD_DATE_FORMAT == 'DDMMYYYY' else raw_date
-    mo, d, y = m.groups()  # Metrix antaa muodossa MM/DD/YY → vaihdetaan paikkaa
-    if len(y) == 2:
-        y = '20' + y
-    d = d.zfill(2)
-    mo = mo.zfill(2)
-    if DISCORD_DATE_FORMAT == 'DDMMYYYY':
-        return f"{d}{mo}{y}"
-    return f"{d}/{mo}/{y}"
+    if m:
+        mo, d, y = m.groups()  # Metrix antaa muodossa MM/DD/YY → vaihdetaan paikkaa
+        if len(y) == 2:
+            y = '20' + y
+        d = d.zfill(2)
+        mo = mo.zfill(2)
+        # ALWAYS return in DD.MM.YYYY format as requested
+        return f"{d}.{mo}.{y}"
+
+    # Kokeile myös eurooppalaista DD.MM.YYYY -muotoa
+    m2 = re.search(r'(\d{1,2})\.(\d{1,2})\.(\d{4})', raw_date)
+    if m2:
+        d, mo, y = m2.groups()
+        d = d.zfill(2)
+        mo = mo.zfill(2)
+        return f"{d}.{mo}.{y}"
+
+    # Lopuksi koetetaan ISO-tyyppinen YYYY-MM-DD
+    m3 = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', raw_date)
+    if m3:
+        y, mo, d = m3.groups()
+        d = d.zfill(2)
+        mo = mo.zfill(2)
+        return f"{d}.{mo}.{y}"
+
+    # Jos ei osunut mihinkään tunnistettuun muotoon, palauta tyhjä merkkijono
+    return ''
 
 
 def _load_dotenv(path='.env'):
@@ -454,6 +489,84 @@ def run_once():
 
     pdga_display_list = [c for c in pdga_list if not _is_pdga_container(c, pdga_list)]
 
+    # Helper: try to parse a raw date string into a datetime.date object.
+    def _parse_raw_date_to_date(raw_date: str):
+        if not raw_date:
+            return None
+        try:
+            m = re.search(r'(\d{1,2})/(\d{1,2})/(\d{2,4})', raw_date)
+            if m:
+                mo, d, y = m.groups()
+                if len(y) == 2:
+                    y = '20' + y
+                return datetime(int(y), int(mo), int(d)).date()
+        except Exception:
+            pass
+        try:
+            m2 = re.search(r'(\d{1,2})\.(\d{1,2})\.(\d{4})', raw_date)
+            if m2:
+                d, mo, y = m2.groups()
+                return datetime(int(y), int(mo), int(d)).date()
+        except Exception:
+            pass
+        try:
+            m3 = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', raw_date)
+            if m3:
+                y, mo, d = m3.groups()
+                return datetime(int(y), int(mo), int(d)).date()
+        except Exception:
+            pass
+        return None
+
+    # Filter out already-past weekly and PDGA display items so they are not treated as "new".
+    today = datetime.now().date()
+    try:
+        filtered_weekly = []
+        for w in weekly_display_list:
+            raw_date = (w.get('date') or '')
+            parsed = _parse_raw_date_to_date(raw_date)
+            if parsed is None:
+                # keep if we can't determine date
+                filtered_weekly.append(w)
+            else:
+                # keep only if event date is today or in future
+                if parsed >= today:
+                    filtered_weekly.append(w)
+        weekly_display_list = filtered_weekly
+    except Exception:
+        pass
+
+    try:
+        filtered_pdga = []
+        for c in pdga_display_list:
+            raw_date = (c.get('date') or '')
+            parsed = _parse_raw_date_to_date(raw_date)
+            if parsed is None:
+                filtered_pdga.append(c)
+            else:
+                if parsed >= today:
+                    filtered_pdga.append(c)
+        pdga_display_list = filtered_pdga
+    except Exception:
+        pass
+
+    # Filter out past doubles/pair events as well so old parikisat are not suggested
+    try:
+        filtered_doubles = []
+        for d in doubles_list:
+            raw_date = (d.get('date') or '')
+            parsed = _parse_raw_date_to_date(raw_date)
+            if parsed is None:
+                # keep if we can't determine date
+                filtered_doubles.append(d)
+            else:
+                # keep only if event date is today or in future
+                if parsed >= today:
+                    filtered_doubles.append(d)
+        doubles_list = filtered_doubles
+    except Exception:
+        pass
+
     # Normalize PDGA entries that are multi-round events (e.g. suffix "→ 1. Kierros", "→ 2. Kierros").
     # Keep only a single representative per multi-round event — prefer a base (non-round) entry,
     # otherwise prefer the explicit "1. Kierros" entry, or the earliest date among rounds.
@@ -530,6 +643,11 @@ def run_once():
         return final
 
     pdga_display_list = _normalize_pdga_rounds(pdga_display_list)
+    # Sort PDGA display list by parsed date ascending so notifications follow date order
+    try:
+        pdga_display_list = sorted(pdga_display_list, key=lambda c: (_parse_raw_date_to_date(c.get('date') or c.get('start') or '') or datetime.max))
+    except Exception:
+        pass
 
     # Prepare summaries
     pdga_count = len(pdga_display_list)
@@ -564,7 +682,11 @@ def run_once():
 
     def fmt_weekly_and_doubles(weeks, doubles, limit=20):
         lines = []
-        for i, c in enumerate(weeks[:limit]):
+        try:
+            weeks_sorted = sorted(weeks, key=lambda w: (_parse_raw_date_to_date(w.get('date') or w.get('start') or '') or datetime.max))
+        except Exception:
+            weeks_sorted = weeks
+        for i, c in enumerate(weeks_sorted[:limit]):
             # Build a single line for the competition based on configuration flags
             raw_title = c.get('title') or c.get('name') or ''
             title = _shorten_series_title(raw_title)
@@ -600,8 +722,12 @@ def run_once():
         if len(weeks) > limit:
             lines.append(f"...and {len(weeks)-limit} more weeklies")
         if doubles:
+            try:
+                doubles_sorted = sorted(doubles, key=lambda d: (_parse_raw_date_to_date(d.get('date') or d.get('start') or '') or datetime.max))
+            except Exception:
+                doubles_sorted = doubles
             lines.append('\nDoubles / pairs:')
-            for d in doubles[:limit]:
+            for d in doubles_sorted[:limit]:
                 raw_title = d.get('title') or d.get('name') or ''
                 title = _shorten_series_title(raw_title)
                 raw_date = d.get('date') or ''
@@ -763,48 +889,64 @@ def run_once():
 
         pdga_detections = []
         if new_pdga:
-            groups = {}
-            for c in new_pdga:
-                tier = (c.get('tier') or '').strip() or 'Muut'
-                groups.setdefault(tier, []).append(c)
-
+            # Post each new PDGA competition as an individual embed with richer info.
+            # Batch embeds in groups of up to 10 to respect Discord limits.
             embeds = []
-            for tier, items in sorted(groups.items(), key=lambda x: x[0]):
-                t = (tier or '').strip()
-                norm = re.sub(r'(?i)\s*[-–—]\s*pdga$', '', t)
-                norm = re.sub(r'(?i)\bpdga\b$', '', norm).strip()
-                if not norm or norm.lower() == 'muut':
-                    title = "Uusia PDGA-kisoja lisätty"
-                else:
-                    display = norm
-                    if len(norm) == 1 and norm.isalpha():
-                        display = f"{norm.upper()}-tier"
-                    title = f"Uusia {display} kisoja lisätty"
-                lines = []
-                for it in items[:40]:
-                    name = it.get('name') or it.get('title') or ''
-                    url = it.get('url') or ''
-                    suffix = _capacity_suffix(it)
-                    if url:
-                        lines.append(f"• [{name}]({url}){suffix}")
-                    else:
-                        lines.append(f"• {name}{suffix}")
-                if len(items) > 40:
-                    lines.append(f"...and {len(items)-40} more")
-                embed = {
-                    'title': title,
-                    'description': "\n".join(lines) or '(none)',
-                    'color': 16750848
-                }
-                embeds.append(embed)
-                if len(embeds) >= 10:
-                    break
+            for it in new_pdga:
+                name = it.get('name') or it.get('title') or '(nimi puuttuu)'
+                url = it.get('url') or ''
+                raw_date = it.get('date') or ''
+                date = _format_date_field(raw_date) if DISCORD_SHOW_DATE else ''
+                location = it.get('location') or ''
+                cid = it.get('id') or ''
+                tier = (it.get('tier') or '').strip() or ''
+                suffix = _capacity_suffix(it)
 
-            if embeds:
-                post_embeds_to_discord(pdga_thread, token, embeds)
-            else:
-                pdga_msg = f"UUSIA PDGA-KILPAILUJA LISÄTTY ({len(new_pdga)})\n\n" + fmt_pdga_list(new_pdga)
-                post_to_discord(pdga_thread, token, pdga_msg)
+                parts = []
+                if DISCORD_SHOW_ID and cid:
+                    parts.append(f"ID: {cid}")
+                if DISCORD_SHOW_LOCATION and location:
+                    parts.append(f"Paikka: {location}")
+                if date:
+                    parts.append(f"Päivä: {date}")
+                if tier:
+                    parts.append(f"Tier: {tier}")
+
+                desc = '\n'.join(parts) if parts else ''
+                if suffix:
+                    # capacity suffix already includes leading space/parentheses in most cases
+                    desc = (desc + '\n' + suffix.strip()) if desc else suffix.strip()
+
+                embed = {'title': name, 'color': 16750848}
+                if url:
+                    embed['url'] = url
+                embed['description'] = desc or '(lisätietoja ei saatavilla)'
+                embeds.append(embed)
+
+            # Send embeds in batches of 10
+            try:
+                for i in range(0, len(embeds), 10):
+                    batch = embeds[i:i+10]
+                    post_embeds_to_discord(pdga_thread, token, batch)
+                # Mark each posted PDGA competition as published in sqlite/json_store
+                try:
+                    if kk_data_store is not None:
+                        for it in new_pdga:
+                            gid = str(it.get('id') or it.get('url') or _unique_key(it) or '')
+                            if gid:
+                                try:
+                                    kk_data_store.mark_published(gid, title=it.get('name') or it.get('title'), url=it.get('url'))
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
+            except Exception:
+                # Fallback to a compact text message when embed posting fails
+                try:
+                    pdga_msg = f"UUSIA PDGA-KILPAILUJA LISÄTTY ({len(new_pdga)})\n\n" + fmt_pdga_list(new_pdga)
+                    post_to_discord(pdga_thread, token, pdga_msg)
+                except Exception:
+                    pass
             # Try to detect Lakeus players in Top3 for any PDGA items that include a results URL
             try:
                 for it in new_pdga:
@@ -981,6 +1123,17 @@ def run_once():
 
     # Post weeklies + doubles as a single compact embed (falls back to plain text)
     def build_weekly_embed(weeks, doubles):
+        # Sort weeks and doubles by parsed date (ascending). Do not remove entries; only order them.
+        try:
+            weeks_sorted = sorted(weeks, key=lambda w: (_parse_raw_date_to_date(w.get('date') or w.get('start') or '') or datetime.max))
+        except Exception:
+            weeks_sorted = weeks
+
+        try:
+            doubles_sorted = sorted(doubles, key=lambda d: (_parse_raw_date_to_date(d.get('date') or d.get('start') or '') or datetime.max)) if doubles else []
+        except Exception:
+            doubles_sorted = doubles or []
+
         # Friendly title: singular/plural for weeklies, include doubles if present
         if len(weeks) == 1:
             week_part = "Uusi viikkokisa lisätty"
@@ -993,7 +1146,7 @@ def run_once():
 
         title = " ja ".join(p for p in (week_part, double_part) if p) or f"VIIKKARIT ({len(weeks)}) ja PARIKISAT ({len(doubles)})"
         lines = []
-        for c in weeks:
+        for c in weeks_sorted:
             raw_title = c.get('title') or c.get('name') or ''
             title_text = _shorten_series_title(raw_title)
             raw_date = c.get('date') or ''
@@ -1020,7 +1173,7 @@ def run_once():
         if doubles:
             lines.append('')
             lines.append('Parikisat:')
-            for d in doubles:
+            for d in doubles_sorted:
                 raw_title = d.get('title') or d.get('name') or ''
                 title_text = _shorten_series_title(raw_title)
                 raw_date = d.get('date') or ''
@@ -1064,9 +1217,14 @@ def run_once():
                     return str(item.get('id'))
                 if item.get('url'):
                     return str(item.get('url'))
-                name = item.get('title') or item.get('name') or ''
-                date = item.get('date') or ''
-                return f"{name}|{date}".strip()
+                name = (item.get('title') or item.get('name') or '').strip()
+                raw_date = item.get('date') or item.get('start') or ''
+                # Normalize date to consistent DD.MM.YYYY (no time) for stable keys
+                try:
+                    date_norm = _format_date_field(str(raw_date)) or ''
+                except Exception:
+                    date_norm = str(raw_date or '')
+                return f"{name}|{date_norm}".strip()
             except Exception:
                 return str(item)
 
@@ -1200,10 +1358,18 @@ def run_once():
                 for w, res, hc_table in results_added:
                     title_text = _shorten_series_title(w.get('title') or w.get('name') or '')
                     url = w.get('url') or ''
+                    raw_date = w.get('date') or ''
+                    date_text = _format_date_field(raw_date) if DISCORD_SHOW_DATE else ''
                     if url:
-                        lines.append(f"• [{title_text}]({url})")
+                        if date_text:
+                            lines.append(f"• [{title_text}]({url}) — {date_text}")
+                        else:
+                            lines.append(f"• [{title_text}]({url})")
                     else:
-                        lines.append(f"• {title_text}")
+                        if date_text:
+                            lines.append(f"• {title_text} — {date_text}")
+                        else:
+                            lines.append(f"• {title_text}")
                     # Include Top3 snippet if available
                     try:
                         if res:
@@ -1227,6 +1393,18 @@ def run_once():
                         post_to_discord(weekly_thread, token, f"Uusia tuloksia saatavilla:\n\n{desc}")
                     except Exception:
                         pass
+                # Mark these weekly events as published so results won't be re-reported
+                try:
+                    if kk_data_store is not None:
+                        for w, res, hc in results_added:
+                            try:
+                                gid = str(w.get('id') or w.get('url') or _unique_key(w) or '')
+                                if gid:
+                                    kk_data_store.mark_published(gid, title=w.get('title') or w.get('name'), url=w.get('url'))
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
 
         if new_weeklies or new_doubles:
             embed = build_weekly_embed(new_weeklies, new_doubles)
@@ -1234,6 +1412,26 @@ def run_once():
             if not posted:
                 wd_msg = f"VIIKKARIT ({len(new_weeklies)}) ja PARIKISAT ({len(new_doubles)})\n\n" + fmt_weekly_and_doubles(new_weeklies, new_doubles)
                 post_to_discord(weekly_thread, token, wd_msg)
+            else:
+                # Mark weeklies/doubles as published in DB
+                try:
+                    if kk_data_store is not None:
+                        for w in new_weeklies:
+                            gid = str(w.get('id') or w.get('url') or _unique_key(w) or '')
+                            if gid:
+                                try:
+                                    kk_data_store.mark_published(gid, title=w.get('title') or w.get('name'), url=w.get('url'))
+                                except Exception:
+                                    pass
+                        for d in new_doubles:
+                            gid = str(d.get('id') or d.get('url') or _unique_key(d) or '')
+                            if gid:
+                                try:
+                                    kk_data_store.mark_published(gid, title=d.get('title') or d.get('name'), url=d.get('url'))
+                                except Exception:
+                                    pass
+                except Exception:
+                    pass
         else:
             # Ei uusia viikkokisoja/parikisoja -> lähetetään silti päivittäinen yhteenveto
             print('Ei uusia viikkokisoja tai parikisoja; lähetetään päivittäinen yhteenveto Discordiin')
@@ -1402,6 +1600,23 @@ def _run_capacity_scan_and_alerts_once(base_dir):
     ajankohtaisiksi, jotta PDGA-yhteenvedot ja !paikat-komento näyttävät tuoreet
     lukemat myös kertaluonteisissa ajoissa.
     """
+    # Avoid running the full capacity scan too often during testing/development:
+    # If the existing CAPACITY_SCAN_RESULTS.json was updated less than 12 hours ago,
+    # skip performing the scan now.
+    try:
+        scan_path = os.path.join(base_dir, 'CAPACITY_SCAN_RESULTS.json')
+        if os.path.exists(scan_path):
+            try:
+                mtime = datetime.utcfromtimestamp(os.path.getmtime(scan_path))
+                if datetime.utcnow() - mtime < timedelta(hours=12):
+                    print('Recent capacity scan found (<12h); skipping new scan.')
+                    return
+            except Exception as _e:
+                print('Warning: could not read capacity scan timestamp:', _e)
+    except Exception:
+        # best effort only; continue to attempt scan if any error occurs
+        pass
+
     try:
         import run_capacity_scan as rcs
         try:
@@ -1665,17 +1880,331 @@ def main():
     # Ensure we treat LAST_DIGEST_DATE as the module-level global throughout main()
     global LAST_DIGEST_DATE
 
-    # Run startup capacity check/posting if token configured
+    # Do not post capacity scan results immediately on startup; only a short "I'm here" notice.
     token = os.environ.get('DISCORD_TOKEN')
-    try:
-        post_startup_capacity_alerts(BASE_DIR, token)
-    except Exception as e:
-        print('Startup capacity alert check failed:', e)
 
     # Optionally run an initial full search on startup. Controlled by env var AUTO_RUN_ON_STARTUP (default 1).
     try:
         auto_start = os.environ.get('AUTO_RUN_ON_STARTUP', '1')
         if auto_start == '1' and not args.once:
+            # Notify channels that bot is up and will update competitions, then run in background.
+            try:
+                if token:
+                    # Build a short "news bulletin" for startup: last week's competitions and upcoming-week
+                    try:
+                        # Load data from json_store or files
+                        pdga = []
+                        weeklies = []
+                        doubles = []
+                        try:
+                            if kk_data_store is not None:
+                                pdga = kk_data_store.load_category('PDGA') or []
+                                weeklies = kk_data_store.load_category(os.path.splitext(WEEKLY_JSON)[0]) or []
+                                doubles = kk_data_store.load_category('DOUBLES') or []
+                        except Exception:
+                            pdga = []
+                            weeklies = []
+                            doubles = []
+                        # Fallback to files
+                        root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+                        if not pdga:
+                            try:
+                                with open(os.path.join(root, 'PDGA.json'), 'r', encoding='utf-8') as f:
+                                    pdga = json.load(f) or []
+                            except Exception:
+                                pdga = []
+                        if not weeklies:
+                            try:
+                                with open(os.path.join(root, WEEKLY_JSON), 'r', encoding='utf-8') as f:
+                                    weeklies = json.load(f) or []
+                            except Exception:
+                                weeklies = []
+
+                        # Helper parse function (returns date or None)
+                        def _parse_dt(s):
+                            if not s:
+                                return None
+                            s = str(s).strip()
+                            m = re.search(r'(\d{1,2})/(\d{1,2})/(\d{2,4})', s)
+                            if m:
+                                mo, d, y = m.groups()
+                                if len(y) == 2:
+                                    y = '20' + y
+                                try:
+                                    return datetime(int(y), int(mo), int(d)).date()
+                                except Exception:
+                                    pass
+                            m2 = re.search(r'(\d{1,2})\.(\d{1,2})\.(\d{4})', s)
+                            if m2:
+                                d, mo, y = m2.groups()
+                                try:
+                                    return datetime(int(y), int(mo), int(d)).date()
+                                except Exception:
+                                    pass
+                            m3 = re.search(r'(\d{4})-(\d{1,2})-(\d{1,2})', s)
+                            if m3:
+                                y, mo, d = m3.groups()
+                                try:
+                                    return datetime(int(y), int(mo), int(d)).date()
+                                except Exception:
+                                    pass
+                            return None
+
+                        today = datetime.now().date()
+                        last_week_start = today - timedelta(days=7)
+                        next_week_end = today + timedelta(days=7)
+
+                        last_week_events = []
+                        for ev in (pdga or []) + (weeklies or []):
+                            try:
+                                dt = _parse_dt(ev.get('date') or ev.get('start') or '')
+                                if dt and last_week_start <= dt <= today:
+                                    last_week_events.append((dt, ev))
+                            except Exception:
+                                continue
+
+                        upcoming_with_members = []
+                        # Try to detect club members for upcoming events (best-effort)
+                        try:
+                            ct = __import__('komento_koodit.commands_tulokset', fromlist=[''])
+                        except Exception:
+                            ct = None
+                        for ev in (pdga or []) + (weeklies or []):
+                            try:
+                                dt = _parse_dt(ev.get('date') or ev.get('start') or '')
+                                if not dt or not (today <= dt <= next_week_end):
+                                    continue
+                                # If there's a URL, try to fetch results/participants and detect club members
+                                url_raw = ev.get('url') or ev.get('metrix') or ev.get('id') or ''
+                                if not url_raw or ct is None:
+                                    continue
+                                try:
+                                    url_base = ct._build_competition_url(url_raw) or url_raw
+                                    url = ct._ensure_results_url(url_base)
+                                except Exception:
+                                    continue
+                                try:
+                                    res = ct._fetch_competition_results(url)
+                                except Exception:
+                                    res = None
+                                try:
+                                    hc = ct._fetch_handicap_table(url)
+                                except Exception:
+                                    hc = []
+                                dets = []
+                                if res:
+                                    try:
+                                        dets = ct._detect_club_memberships_for_event({"classes": res.get('classes', [])}, hc, ev.get('name') or ev.get('title') or '')
+                                    except Exception:
+                                        dets = []
+                                if dets:
+                                    upcoming_with_members.append((dt, ev, dets))
+                            except Exception:
+                                continue
+
+                        # Compose news bulletin (extended): last week's events, upcoming events with club members,
+                        # and new PDGA-approved discs since last check.
+                        lines = []
+                        lines.append('🗞️ **LakeusBotti — Uutispalvelu**')
+                        lines.append('')
+
+                        # Last week events (compact)
+                        if last_week_events:
+                            lines.append('📅 Viime viikolla pelatut kilpailut:')
+                            for dt, ev in sorted(last_week_events)[:12]:
+                                name = ev.get('title') or ev.get('name') or '(nimi puuttuu)'
+                                loc = ev.get('location') or ev.get('place') or ev.get('city') or ''
+                                loc_part = f' — {loc}' if loc else ''
+                                # Attempt to fetch results for richer top-3 info
+                                top_line = None
+                                try:
+                                    url_raw = ev.get('url') or ev.get('metrix') or ev.get('id') or ''
+                                    res = None
+                                    if url_raw and ct is not None:
+                                        try:
+                                            url_base = ct._build_competition_url(url_raw) or url_raw
+                                            url = ct._ensure_results_url(url_base)
+                                            res = ct._fetch_competition_results(url)
+                                        except Exception:
+                                            res = None
+
+                                    # Determine player count
+                                    try:
+                                        players = ev.get('players') or ev.get('registered') or ev.get('participants') or None
+                                    except Exception:
+                                        players = None
+                                    if not players and res:
+                                        try:
+                                            classes_res = res.get('classes', [])
+                                            players = sum(len(c.get('results', [])) for c in classes_res if isinstance(c.get('results', []), list))
+                                        except Exception:
+                                            players = None
+
+                                    # Find first class with results and format top-3
+                                    if res:
+                                        try:
+                                            classes_res = res.get('classes', [])
+                                            chosen = None
+                                            for c in classes_res:
+                                                if c and (c.get('results') or c.get('players')):
+                                                    chosen = c
+                                                    break
+                                            if chosen:
+                                                class_label = chosen.get('name') or chosen.get('title') or chosen.get('class') or ''
+                                                results_list = chosen.get('results') or chosen.get('players') or []
+                                                top_entries = []
+                                                for idx, p in enumerate(results_list[:3], start=1):
+                                                    pname = p.get('name') or p.get('player') or ''
+                                                    score = p.get('score') or p.get('points') or p.get('diff') or ''
+                                                    throws = p.get('throws') or p.get('shots') or ''
+                                                    rtg = p.get('rating') or p.get('rtg') or ''
+                                                    parts = []
+                                                    parts.append(f'{idx}) {pname}')
+                                                    if score is not None and score != '':
+                                                        parts.append(str(score))
+                                                    meta = []
+                                                    if throws:
+                                                        meta.append(str(throws))
+                                                    if rtg:
+                                                        meta.append(f'rtg {rtg}')
+                                                    if meta:
+                                                        parts.append('(' + ', '.join(meta) + ')')
+                                                    top_entries.append(' '.join(parts))
+                                                players_part = f' ({players} pelaajaa)' if players else ''
+                                                top_line = f'• {name} — {dt.strftime("%d.%m.%Y")} | {class_label}{players_part} / ' + ' / '.join(top_entries)
+                                        except Exception:
+                                            top_line = None
+                                except Exception:
+                                    top_line = None
+
+                                if top_line:
+                                    lines.append(top_line)
+                                else:
+                                    # Fallback simple line
+                                    players_part = f' ({players} pelaajaa)' if players else ''
+                                    lines.append(f'• {name} — {dt.strftime("%d.%m.%Y")}{loc_part}{players_part}')
+                            lines.append('')
+                        else:
+                            lines.append('📅 Viime viikolla ei löytynyt merkittäviä kilpailuja.')
+                            lines.append('')
+
+                        # Upcoming events with club members — provide richer info when available
+                        if upcoming_with_members:
+                            lines.append('🔜 Tulevan viikon kilpailut, joissa seuramme pelaajia on mukana:')
+                            for dt, ev, dets in sorted(upcoming_with_members)[:10]:
+                                name = ev.get('title') or ev.get('name') or '(nimi puuttuu)'
+                                # player count: try multiple fields
+                                try:
+                                    pcount = ev.get('registered') or ev.get('players') or ev.get('participants') or ev.get('registered_count')
+                                except Exception:
+                                    pcount = None
+                                # quota/limit
+                                try:
+                                    limit = ev.get('limit') or ev.get('quota') or ev.get('capacity') or ev.get('max')
+                                except Exception:
+                                    limit = None
+                                # classes
+                                classes = ev.get('classes') or ev.get('class') or ev.get('categories') or ''
+                                if isinstance(classes, list):
+                                    classes = ','.join(str(x) for x in classes[:6])
+                                # location
+                                loc = ev.get('location') or ev.get('place') or ev.get('city') or ''
+                                # registration open
+                                reg_open = ev.get('registration_open') or ev.get('reg_open') or ev.get('regstart') or ev.get('registration_start') or ev.get('registration') or ''
+                                # Build line with available pieces
+                                parts = [f'• {name}', f'{dt.strftime("%d.%m.%Y")}']
+                                if loc:
+                                    parts.append(loc)
+                                if pcount is not None:
+                                    parts.append(f'pelaajia: {pcount}')
+                                if limit is not None:
+                                    parts.append(f'kiintiö: {limit}')
+                                if classes:
+                                    parts.append(f'luokat: {classes}')
+                                if reg_open:
+                                    # try to format if date-like
+                                    rfmt = _format_date_field(str(reg_open)) or reg_open
+                                    parts.append(f'ilmoitt. alk.: {rfmt}')
+                                # Add count of our club members detected
+                                try:
+                                    club_count = len({d.get('metrix_id') or d.get('name') for d in dets})
+                                except Exception:
+                                    club_count = 0
+                                parts.append(f'— seurapelaajia: {club_count}')
+                                lines.append(' — '.join(parts))
+                            lines.append('')
+                        else:
+                            lines.append('🔜 Ei tulevan viikon kisoja, joissa seuramme pelaajia nähtiin heti.')
+                            lines.append('')
+
+                        # Include new PDGA-approved discs (check known file but don't update it here)
+                        try:
+                            discs_lines = []
+                            known_path = os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')), KNOWN_PDGA_DISCS_FILE)
+                            known_keys = set()
+                            try:
+                                with open(known_path, 'r', encoding='utf-8') as f:
+                                    known_keys = set(str(x) for x in (json.load(f) or []))
+                            except Exception:
+                                known_keys = set()
+                            # Fetch CSV quickly and detect new keys without updating file
+                            try:
+                                resp = requests.get('https://www.pdga.com/technical-standards/equipment-certification/discs/export', timeout=20)
+                                if resp.status_code == 200 and resp.text:
+                                    rows = list(csv.DictReader(resp.text.splitlines()))
+                                    new_count = 0
+                                    for row in rows[:20]:
+                                        manu = (row.get('Manufacturer / Distributor') or '').strip()
+                                        model = (row.get('Disc Model') or '').strip()
+                                        cert = (row.get('Certification Number') or '').strip()
+                                        key = cert or f"{manu}|{model}"
+                                        if key and key not in known_keys:
+                                            disc_class = (row.get('Class') or '').strip()
+                                            approved = (row.get('Approved Date') or '').strip()
+                                            parts = [model or 'Tuntematon malli']
+                                            if manu:
+                                                parts.append(manu)
+                                            if disc_class:
+                                                parts.append(disc_class)
+                                            if approved:
+                                                parts.append(approved)
+                                            discs_lines.append(' — '.join(parts))
+                                            new_count += 1
+                                            if new_count >= 6:
+                                                break
+                                    if new_count:
+                                        lines.append('🆕 Uudet PDGA-hyväksytyt kiekot:')
+                                        for dl in discs_lines:
+                                            lines.append(f'• {dl}')
+                                        if new_count < len(rows):
+                                            lines.append('')
+                                        lines.append('')
+                            except Exception:
+                                pass
+                        except Exception:
+                            pass
+
+                        lines.append('ℹ️ Ilmoitan muuten uusista kilpailuista vain kerran. Kysy lisätietoja komennolla !kisa tai !ohje.')
+                        bulletin = '\n'.join(lines)
+                        try:
+                            post_to_discord(str(DISCORD_CHANNEL_ID), token, bulletin)
+                        except Exception:
+                            try:
+                                post_to_discord(str(TEST_CHANNEL_ID), token, bulletin)
+                            except Exception:
+                                pass
+                    except Exception:
+                        # fallback to simple start message on error
+                        try:
+                            post_to_discord(str(DISCORD_CHANNEL_ID), token, '👋 LakeusBotti paikalla — päivitän taustalla.')
+                        except Exception:
+                            try:
+                                post_to_discord(str(TEST_CHANNEL_ID), token, '👋 LakeusBotti paikalla — päivitän taustalla.')
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+
             # Run in background so presence and command listener can start quickly
             def _startup_run():
                 try:

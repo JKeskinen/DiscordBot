@@ -258,10 +258,28 @@ class CommandListenerThread(threading.Thread):
 
                 # --- !viikkarit: tämän viikon viikkokisat (VIIKKOKISA.json) ---
                 if command == 'viikkarit':
-                    if viikkarit_commands is not None and hasattr(viikkarit_commands, 'handle_viikkarit'):
-                        await viikkarit_commands.handle_viikkarit(message, parts)
-                    else:
-                        await message.channel.send('Virhe: viikkarit-komentoa ei voi suorittaa (moduuli puuttuu).')
+                    # Try to import the module dynamically if it wasn't available at startup
+                    try:
+                        if viikkarit_commands is None:
+                            try:
+                                from . import commands_viikkarit as vi_mod
+                                globals()['viikkarit_commands'] = vi_mod
+                                viikkarit_local = vi_mod
+                            except Exception as ie:
+                                await message.channel.send(f'Virhe: viikkarit-komentoa ei voi suorittaa (moduuli latautui virheellisesti): {ie}')
+                                return
+                        else:
+                            viikkarit_local = viikkarit_commands
+
+                        if hasattr(viikkarit_local, 'handle_viikkarit'):
+                            await viikkarit_local.handle_viikkarit(message, parts)
+                        else:
+                            await message.channel.send('Virhe: viikkarit-komennolle ei löydy käsittelijää (handle_viikkarit).')
+                    except Exception as e:
+                        try:
+                            await message.channel.send(f'Virhe suoritettaessa viikkarit-komentoa: {e}')
+                        except Exception:
+                            pass
                     return
 
                 # --- !tulokset: kilpailutulokset (esim. viikkari Top3) ---

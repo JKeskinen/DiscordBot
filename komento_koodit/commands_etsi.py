@@ -3,6 +3,7 @@ import json
 import re
 from typing import Any, List
 import sqlite3
+from datetime import datetime
 
 try:
     import discord  # type: ignore[import]
@@ -599,7 +600,7 @@ async def handle_kisa(message: Any, parts: Any) -> None:
                     code = raw_tier
             tiers_map[code].append(e)
 
-        # prepare quick DB lookup for existing capacity snapshots
+        # prepare quick DB lookup for existing capacity snapshots (file fallback)
         db_path = os.path.join(root, 'data', 'discordbot.db')
         try:
             db_conn = sqlite3.connect(db_path)
@@ -607,6 +608,32 @@ async def handle_kisa(message: Any, parts: Any) -> None:
         except Exception:
             db_conn = None
             db_cur = None
+        # also load CAPACITY_SCAN_RESULTS.json for more reliable counts when available
+        capacity_by_url = {}
+        capacity_by_id = {}
+        try:
+            cap_path = os.path.join(root, 'CAPACITY_SCAN_RESULTS.json')
+            with open(cap_path, 'r', encoding='utf-8') as f:
+                cap_data = json.load(f) or []
+            for item in cap_data:
+                cid = str(item.get('id') or '')
+                url = item.get('url') or ''
+                cap = item.get('capacity_result') or {}
+                try:
+                    reg = int(cap.get('registered')) if cap.get('registered') is not None else None
+                except Exception:
+                    reg = None
+                try:
+                    lim = int(cap.get('limit')) if cap.get('limit') is not None else None
+                except Exception:
+                    lim = None
+                info = {'registered': reg, 'limit': lim}
+                if cid:
+                    capacity_by_id[cid] = info
+                if url:
+                    capacity_by_url[url] = info
+        except Exception:
+            pass
 
         # desired tier order and ordering key
         preferred = ['A', 'B', 'C', 'L', 'X']
@@ -623,45 +650,122 @@ async def handle_kisa(message: Any, parts: Any) -> None:
         Embed_cls = getattr(discord, 'Embed', None)
 
         sent_any = False
+        # For consistent output order, sort events within a tier by date (future first)
         for tier_code in sorted(tiers_map.keys(), key=tier_order_key):
             events = tiers_map[tier_code]
             if not events:
                 continue
             header = f"{tier_code}-tier" if tier_code != 'Other' else 'Other'
+            # Build list of (date_obj, event) for sorting and filtering (only future events)
+            evs_with_dates = []
+            for e in events:
+                raw_date_text = str(e.get('date') or '')
+                date_text = ''
+                date_obj = None
+                if raw_date_text:
+                    try:
+                        date_norm = normalize_date_string(raw_date_text, prefer_month_first=True)
+                        date_text = date_norm
+                        # parse date part (ignore time)
+                        ds = date_norm.split()[0]
+                        try:
+                            date_obj = datetime.strptime(ds, '%d.%m.%Y').date()
+                        except Exception:
+                            date_obj = None
+                    except Exception:
+                        date_text = raw_date_text
+                # Only include upcoming events (today or later)
+                today = datetime.now().date()
+                if date_obj is not None and date_obj < today:
+                    continue
+                evs_with_dates.append((date_obj or datetime.max.date(), e, date_text))
+
+            # sort by date then title
+            evs_with_dates.sort(key=lambda x: (x[0], str(x[1].get('title') or x[1].get('name') or '')))
+
             lines = [f"**{header}:**"]
-            for e in sorted(events, key=lambda ev: str(ev.get('title') or ev.get('name') or '')):
+            for _date_obj, e, date_text in evs_with_dates:
                 title = str(e.get('title') or e.get('name') or '')
                 url = str(e.get('url') or '')
-                date_text = str(e.get('date') or '')
+                # Determine capacity display: prefer CAPACITY_SCAN_RESULTS.json, then DB.
+                # If those are missing, attempt a live capacity check (may add latency).
                 cap_part = ''
-                if url and db_cur is not None:
-                    try:
+                try:
+                    cid = str(e.get('id') or '')
+                    info = None
+                    if url and url in capacity_by_url:
+                        info = capacity_by_url.get(url)
+                    elif cid and cid in capacity_by_id:
+                        info = capacity_by_id.get(cid)
+                    elif db_cur is not None and url:
                         db_cur.execute('SELECT registered, cap_limit FROM competitions WHERE url = ? LIMIT 1', (url,))
                         row = db_cur.fetchone()
                         if row:
-                            reg_val, lim_val = row[0], row[1]
                             try:
-                                reg_i = int(reg_val) if reg_val is not None else None
+                                reg_i = int(row[0]) if row[0] is not None else None
                             except Exception:
                                 reg_i = None
                             try:
-                                lim_i = int(lim_val) if lim_val is not None else None
+                                lim_i = int(row[1]) if row[1] is not None else None
                             except Exception:
                                 lim_i = None
-                            if reg_i is None and lim_i is not None:
-                                cap_part = f" ({0}/{lim_i})"
-                            elif reg_i is not None and lim_i is not None:
-                                cap_part = f" ({reg_i}/{lim_i})"
-                            elif reg_i is not None:
-                                cap_part = f" ({reg_i})"
-                    except Exception:
-                        cap_part = ''
-                if url:
-                    lines.append(f"- [{title}]({url}){cap_part}")
-                else:
-                    lines.append(f"- {title}{cap_part}")
+                            info = {'registered': reg_i, 'limit': lim_i}
+                    # If still missing, try a live capacity check using check_capacity module
+                    if not info:
+                        try:
+                            from . import check_capacity as capacity_mod_local
+                        except Exception:
+                            capacity_mod_local = None
+                        if url and capacity_mod_local is not None and hasattr(capacity_mod_local, 'check_competition_capacity'):
+                            try:
+                                loop = __import__('asyncio').get_running_loop()
+                                def _run_live():
+                                    try:
+                                        return capacity_mod_local.check_competition_capacity(url, timeout=10)
+                                    except Exception:
+                                        return None
+                                live = await loop.run_in_executor(None, _run_live)
+                                if isinstance(live, dict):
+                                    try:
+                                        reg_live = int(live.get('registered')) if live.get('registered') is not None else None
+                                    except Exception:
+                                        reg_live = None
+                                    try:
+                                        lim_live = int(live.get('limit')) if live.get('limit') is not None else None
+                                    except Exception:
+                                        lim_live = None
+                                    info = {'registered': reg_live, 'limit': lim_live}
+                            except Exception:
+                                pass
+                    if info:
+                        reg_i = info.get('registered')
+                        lim_i = info.get('limit')
+                        if reg_i is None and lim_i is not None:
+                            cap_part = f" ({0}/{lim_i})"
+                        elif reg_i is not None and lim_i is not None:
+                            cap_part = f" ({reg_i}/{lim_i})"
+                        elif reg_i is not None:
+                            cap_part = f" ({reg_i})"
+                except Exception:
+                    cap_part = ''
+                # Format line: include date_text inline
                 if date_text:
-                    lines.append(f"    {date_text}")
+                    date_disp = date_text
+                else:
+                    date_disp = ''
+                line = f"- {title}{cap_part}"
+                if date_disp:
+                    line += f" — {date_disp}"
+                if url:
+                    # make title a link if possible
+                    if cap_part:
+                        # replace title in line with link
+                        line = line.replace(title, f"[{title}]({url})", 1)
+                    else:
+                        line = f"- [{title}]({url})"
+                        if date_disp:
+                            line += f" — {date_disp}"
+                lines.append(line)
             # chunk and send this tier's message(s)
             cur = []
             cur_len = 0

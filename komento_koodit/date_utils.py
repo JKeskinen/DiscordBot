@@ -12,13 +12,13 @@ def _try_parse(fmt_list, s: str):
 
 
 def normalize_date_string(s: str, prefer_month_first: bool = False) -> str:
-    """Normalize various date string formats to DD/MM/YYYY (with optional time HH:MM).
+    """Normalize various date string formats to DD.MM.YYYY (with optional time HH:MM).
 
     Examples handled:
-    - '01/02/26 12:00' -> '01/02/2026 12:00'
-    - '1.2.2026 12:00' -> '01/02/2026 12:00'
-    - '02/01/26' -> '02/01/2026'
-    - '2026-02-01' -> '01/02/2026'
+    - '01/02/26 12:00' -> '01.02.2026 12:00'
+    - '1.2.2026 12:00' -> '01.02.2026 12:00'
+    - '02/01/26' -> '02.01.2026'
+    - '2026-02-01' -> '01.02.2026'
     If parsing fails, returns the original string.
     """
     if not s or not isinstance(s, str):
@@ -69,7 +69,7 @@ def normalize_date_string(s: str, prefer_month_first: bool = False) -> str:
     if not dt:
         return s
 
-    out = dt.strftime('%d/%m/%Y')
+    out = dt.strftime('%d.%m.%Y')
     if dt.hour or dt.minute:
         out = f"{out} {dt.strftime('%H:%M')}"
     return out

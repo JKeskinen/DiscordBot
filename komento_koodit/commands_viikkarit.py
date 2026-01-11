@@ -2,7 +2,8 @@ import os
 import asyncio
 from datetime import datetime, date, timedelta
 from .date_utils import normalize_date_string
-from typing import Any, List
+from typing import Any, List, Optional, Tuple
+import re
 try:
     import settings
 except Exception:
@@ -72,7 +73,7 @@ async def _get_capacity_display(url: str) -> str:
     return f" ({reg_int})"
 
 
-def _parse_metrix_date(value: str) -> date | None:
+def _parse_metrix_date(value: str) -> Optional[date]:
     """Yritä tulkita Metrixin VIIKKOKISA.jsonissa oleva päivämäärä.
 
     Muodot ovat tyypillisesti esim. "06/27/26 14:00" tai "06/27/26 - 06/27/26".
@@ -137,7 +138,7 @@ async def handle_viikkarit(message: Any, parts: Any) -> None:
         elif sub in ("sata", "satakunta"):
             mode = "sata"
 
-    area_filter: str | None = None
+    area_filter: Optional[str] = None
 
     if mode == "suomi":
         # Suomi-moodi: kisahaku (search_weekly_fast / kisahaku.py) kirjoittaa
